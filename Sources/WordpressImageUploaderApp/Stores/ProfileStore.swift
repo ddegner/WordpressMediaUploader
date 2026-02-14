@@ -29,15 +29,6 @@ final class ProfileStore {
         return profiles.first { $0.id == selectedProfileId }
     }
 
-    func addNewProfile() {
-        var base = ServerProfile.default
-        base.id = UUID()
-        base.name = uniqueProfileName(base: "Profile")
-        profiles.append(base)
-        selectedProfileId = base.id
-        save()
-    }
-
     func update(_ profile: ServerProfile) {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         profiles[idx] = profile
@@ -75,11 +66,33 @@ final class ProfileStore {
         return updated
     }
 
+    func clearPassword(for profile: ServerProfile) throws -> ServerProfile {
+        guard let account = profile.passwordKeychainId else {
+            return profile
+        }
+        try KeychainService.deleteSecret(account: account)
+        var updated = profile
+        updated.passwordKeychainId = nil
+        update(updated)
+        return updated
+    }
+
     func saveKeyPassphrase(_ passphrase: String, for profile: ServerProfile) throws -> ServerProfile {
         let account = profile.keyPassphraseKeychainId ?? "profile-\(profile.id)-key-passphrase"
         try KeychainService.setSecret(passphrase, account: account)
         var updated = profile
         updated.keyPassphraseKeychainId = account
+        update(updated)
+        return updated
+    }
+
+    func clearKeyPassphrase(for profile: ServerProfile) throws -> ServerProfile {
+        guard let account = profile.keyPassphraseKeychainId else {
+            return profile
+        }
+        try KeychainService.deleteSecret(account: account)
+        var updated = profile
+        updated.keyPassphraseKeychainId = nil
         update(updated)
         return updated
     }
@@ -92,19 +105,6 @@ final class ProfileStore {
     func loadKeyPassphrase(for profile: ServerProfile) -> String? {
         guard let account = profile.keyPassphraseKeychainId else { return nil }
         return try? KeychainService.getSecret(account: account)
-    }
-
-    private func uniqueProfileName(base: String) -> String {
-        let existing = Set(profiles.map(\.name))
-        if !existing.contains(base) {
-            return base
-        }
-
-        var idx = 2
-        while existing.contains("\(base) \(idx)") {
-            idx += 1
-        }
-        return "\(base) \(idx)"
     }
 
     private func save() {

@@ -42,59 +42,31 @@ final class SSHTransport {
     // MARK: - Auth context
 
     func makeAuthContext(for profile: ServerProfile) throws -> SSHAuthContext {
-        switch profile.authType {
-        case .sshKey:
-            var args: [String] = []
-            if let keyPath = profile.keyPath,
-               !keyPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            {
-                args += ["-i", keyPath]
-            }
-
-            if let keyPassphrase = profileStore.loadKeyPassphrase(for: profile),
-               !keyPassphrase.isEmpty {
-                let scriptURL = try createAskPassScript(secret: keyPassphrase)
-                args = [
-                    "-o", "BatchMode=no"
-                ] + args
-
-                let env = [
-                    "SSH_ASKPASS": scriptURL.path,
-                    "SSH_ASKPASS_REQUIRE": "force",
-                    "DISPLAY": "1"
-                ]
-                return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: scriptURL)
-            }
-
-            args = [
-                "-o", "BatchMode=yes"
-            ] + args
-            return SSHAuthContext(additionalSSHArgs: args, environment: nil, askPassScriptURL: nil)
-
-        case .password:
-            guard let password = profileStore.loadPassword(for: profile), !password.isEmpty else {
-                throw JobRunnerError.profileIncomplete("Password auth selected, but no password is stored in Keychain")
-            }
-            let scriptURL = try createAskPassScript(secret: password)
-
-            let args = [
-                "-o", "BatchMode=no",
-                "-o", "PreferredAuthentications=password,keyboard-interactive",
-                "-o", "PubkeyAuthentication=no",
-                "-o", "NumberOfPasswordPrompts=1"
-            ]
-
-            let env = [
-                "SSH_ASKPASS": scriptURL.path,
-                "SSH_ASKPASS_REQUIRE": "force",
-                "DISPLAY": "1"
-            ]
-
-            return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: scriptURL)
-        }
+        try makeAuthContext(
+            for: profile,
+            password: profileStore.loadPassword(for: profile),
+            keyPassphrase: profileStore.loadKeyPassphrase(for: profile),
+            passwordMissingDetail: "Password auth selected, but no password is stored in Keychain"
+        )
     }
 
     func makeAuthContext(for profile: ServerProfile, password: String?, keyPassphrase: String?) throws -> SSHAuthContext {
+        try makeAuthContext(
+            for: profile,
+            password: password,
+            keyPassphrase: keyPassphrase,
+            passwordMissingDetail: "Password auth selected, but no password provided"
+        )
+    }
+
+    // MARK: - Auth context (private)
+
+    private func makeAuthContext(
+        for profile: ServerProfile,
+        password: String?,
+        keyPassphrase: String?,
+        passwordMissingDetail: String
+    ) throws -> SSHAuthContext {
         switch profile.authType {
         case .sshKey:
             var args: [String] = []
@@ -124,10 +96,10 @@ final class SSHTransport {
             return SSHAuthContext(additionalSSHArgs: args, environment: nil, askPassScriptURL: nil)
 
         case .password:
-            guard let pw = password, !pw.isEmpty else {
-                throw JobRunnerError.profileIncomplete("Password auth selected, but no password provided")
+            guard let password, !password.isEmpty else {
+                throw JobRunnerError.profileIncomplete(passwordMissingDetail)
             }
-            let scriptURL = try createAskPassScript(secret: pw)
+            let scriptURL = try createAskPassScript(secret: password)
 
             let args = [
                 "-o", "BatchMode=no",
@@ -307,6 +279,13 @@ final class SSHTransport {
         _ = try await runSSH(
             profile: profile,
             auth: auth,
+            remoteCommand: "command -v rsync",
+            writer: writer,
+            onLine: onLine
+        )
+        _ = try await runSSH(
+            profile: profile,
+            auth: auth,
             remoteCommand: "wp --path=\(shellSingleQuote(profile.wpRootPath)) core is-installed",
             writer: writer,
             onLine: onLine
@@ -322,7 +301,9 @@ final class SSHTransport {
     func sshBaseArgs(profile: ServerProfile, auth: SSHAuthContext) -> [String] {
         var args = [
             "-p", "\(profile.port)",
-            "-o", "StrictHostKeyChecking=accept-new"
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=10",
+            "-o", "ConnectionAttempts=1"
         ]
         args += auth.additionalSSHArgs
         args.append("\(profile.username)@\(profile.host)")
@@ -333,7 +314,9 @@ final class SSHTransport {
         var parts = [
             "ssh",
             "-p", "\(profile.port)",
-            "-o", "StrictHostKeyChecking=accept-new"
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=10",
+            "-o", "ConnectionAttempts=1"
         ]
         parts += auth.additionalSSHArgs
         return parts.map(shellSingleQuote).joined(separator: " ")
@@ -358,10 +341,6 @@ final class SSHTransport {
             arguments += ["--append-verify", "--info=progress2"]
         case .compatible:
             arguments += ["--append", "--progress"]
-        }
-
-        if let limit = profile.bwLimitKBps, limit > 0 {
-            arguments.append("--bwlimit=\(limit)")
         }
 
         arguments += ["-e", rsyncSSHTransport(profile: profile, auth: auth)]

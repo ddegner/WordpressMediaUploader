@@ -24,6 +24,16 @@ enum JobRunnerError: LocalizedError {
 @MainActor
 @Observable
 final class JobRunner {
+    private actor ConnectionTestTimeoutState {
+        private(set) var triggered = false
+
+        func markTriggered() {
+            triggered = true
+        }
+    }
+
+    private static let connectionTestTimeoutSeconds: UInt64 = 45
+
     var currentJob: Job?
     var logLines: [String] = []
     var isRunning = false
@@ -180,7 +190,15 @@ final class JobRunner {
     func testConnection(profile: ServerProfile, password: String?, keyPassphrase: String?) async -> ProfileTestResult {
         var checks: [String] = []
         var authContext: SSHAuthContext?
+        let timeoutState = ConnectionTestTimeoutState()
+        let timeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.connectionTestTimeoutSeconds * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await timeoutState.markTriggered()
+            await transport.cancelActiveProcess()
+        }
         defer {
+            timeoutTask.cancel()
             authContext?.cleanup()
         }
 
@@ -205,6 +223,10 @@ final class JobRunner {
 
             return ProfileTestResult(checks: checks, success: true)
         } catch {
+            if await timeoutState.triggered {
+                checks.append("Connection test timed out after \(Self.connectionTestTimeoutSeconds) seconds.")
+                return ProfileTestResult(checks: checks, success: false)
+            }
             checks.append(error.localizedDescription)
             return ProfileTestResult(checks: checks, success: false)
         }
@@ -748,7 +770,8 @@ final class JobRunner {
             }
         }
 
-        if let keyPath = profile.keyPath,
+        if profile.authType == .sshKey,
+           let keyPath = profile.keyPath,
            !keyPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            !FileManager.default.fileExists(atPath: keyPath)
         {

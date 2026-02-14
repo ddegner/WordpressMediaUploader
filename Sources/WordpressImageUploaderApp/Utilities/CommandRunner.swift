@@ -153,6 +153,7 @@ actor CommandRunner {
 
         activeProcess = process
 
+        var launchError: String?
         let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
             process.terminationHandler = { finished in
                 continuation.resume(returning: finished.terminationStatus)
@@ -161,6 +162,7 @@ actor CommandRunner {
             do {
                 try process.run()
             } catch {
+                launchError = error.localizedDescription
                 continuation.resume(returning: Int32.min)
             }
         }
@@ -170,7 +172,7 @@ actor CommandRunner {
         activeProcess = nil
 
         if exitCode == Int32.min {
-            throw CommandRunnerError.launchFailed(spec.displayName)
+            throw CommandRunnerError.launchFailed(launchError ?? spec.displayName)
         }
 
         // Drain any remaining data that arrived after readabilityHandler was cleared

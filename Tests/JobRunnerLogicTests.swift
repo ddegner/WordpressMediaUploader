@@ -166,6 +166,23 @@ final class JobRunnerLogicTests: XCTestCase {
         XCTAssertNoThrow(try runner.validateProfile(profile))
     }
 
+    @MainActor
+    func testValidateProfilePasswordAuthIgnoresMissingSSHKeyPath() {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        var profile = ServerProfile.default
+        profile.host = "example.com"
+        profile.username = "user"
+        profile.wpRootPath = "/var/www/html"
+        profile.remoteStagingRoot = "~/staging"
+        profile.authType = .password
+        profile.keyPath = "/path/that/does/not/exist/id_ed25519"
+
+        XCTAssertNoThrow(try runner.validateProfile(profile, password: "secret"))
+    }
+
     // MARK: - Helpers
 
     private func makeProfile(remoteStagingRoot: String) -> ServerProfile {

@@ -21,7 +21,7 @@ let package = Package(
         .testTarget(
             name: "WordpressMediaUploaderAppTests",
             dependencies: ["WordpressMediaUploaderApp"],
-            path: "Tests/WordpressImageUploaderAppTests"
+            path: "Tests"
         )
     ]
 )

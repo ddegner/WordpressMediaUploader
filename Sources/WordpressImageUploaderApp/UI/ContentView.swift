@@ -15,7 +15,7 @@ private final class ThumbnailProvider {
     }
 
     func thumbnail(for url: URL, size: CGSize, scale: CGFloat) async -> NSImage? {
-        let key = url.standardizedFileURL.path
+        let key = cacheKey(for: url, size: size, scale: scale)
         if let cached = cache.object(forKey: key as NSString) {
             return cached
         }
@@ -34,10 +34,9 @@ private final class ThumbnailProvider {
                 representationTypes: .thumbnail
             )
 
-            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [weak self] representation, _ in
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [key] representation, _ in
                 let image = representation?.nsImage
                 Task { @MainActor in
-                    guard let self else { return }
                     if let image {
                         self.cache.setObject(image, forKey: key as NSString)
                     }
@@ -49,6 +48,12 @@ private final class ThumbnailProvider {
                 }
             }
         }
+    }
+
+    private func cacheKey(for url: URL, size: CGSize, scale: CGFloat) -> String {
+        let pxWidth = Int((size.width * scale).rounded())
+        let pxHeight = Int((size.height * scale).rounded())
+        return "\(url.standardizedFileURL.path)|\(pxWidth)x\(pxHeight)"
     }
 }
 
@@ -89,7 +94,11 @@ private struct FileThumbnailIcon: View {
 }
 
 struct ContentView: View {
-    private static let sectionHeaderFont: Font = .caption.weight(.medium)
+    private static let sectionHeaderFont: Font = .caption2.weight(.semibold)
+    private static let navigatorBackground = Color(nsColor: .windowBackgroundColor)
+    private static let editorBackground = Color(nsColor: .textBackgroundColor)
+    private static let inspectorBackground = Color(nsColor: .windowBackgroundColor)
+    private static let chromeBackground = Color(nsColor: .windowBackgroundColor)
 
     private struct ProfileEditorDraft: Identifiable {
         let id: UUID
@@ -132,31 +141,86 @@ struct ContentView: View {
         case failed
     }
 
+    private enum OperationsTab: String, CaseIterable, Identifiable {
+        case activeJob
+        case terminal
+        case history
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .activeJob: return "Active Job"
+            case .terminal: return "Terminal"
+            case .history: return "Job History"
+            }
+        }
+    }
+
     @Bindable var profileStore: ProfileStore
     @Bindable var jobStore: JobStore
     @Bindable var jobRunner: JobRunner
     @Bindable var externalFileIntake: ExternalFileIntake
-    @Binding var showLogPane: Bool
+    @Binding var showProfilesDrawer: Bool
+    @Binding var showOperationsDrawer: Bool
 
-    @State private var droppedFiles: [URL] = []
     @State private var droppedFileItems: [FileItem] = []
     @State private var isDropTargeted = false
+    @State private var selectedFileRowIDs: Set<String> = []
     @State private var profileEditorDraft: ProfileEditorDraft?
     @State private var showErrorAlert = false
+    @State private var operationsTab: OperationsTab = .activeJob
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+
+    private var selectedProfileBinding: Binding<UUID?> {
+        Binding(
+            get: { profileStore.selectedProfileId },
+            set: { profileStore.setSelectedProfile(id: $0) }
+        )
+    }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 360)
+                .background(Self.navigatorBackground)
         } detail: {
-            detailView
+            middleWorkbench
+                .frame(maxWidth: .infinity)
+                .background(Self.editorBackground)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    middleTopBar
+                }
         }
-        .toolbar { toolbarContent }
+        .navigationSplitViewStyle(.balanced)
+        .inspector(isPresented: $showOperationsDrawer) {
+            operationsDrawer
+                .background(Self.inspectorBackground)
+        }
+        .inspectorColumnWidth(320)
+        .background(Self.editorBackground)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showOperationsDrawer.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .help(showOperationsDrawer ? "Hide operations drawer" : "Show operations drawer")
+            }
+        }
         .onAppear {
+            syncSplitVisibilityFromBindings()
             ingestExternalFiles()
             if profileStore.isEmpty {
                 presentNewProfileEditor()
             }
+        }
+        .onChange(of: showProfilesDrawer) { _, isVisible in
+            splitViewVisibility = isVisible ? .all : .detailOnly
+        }
+        .onChange(of: splitViewVisibility) { _, visibility in
+            showProfilesDrawer = isSidebarVisible(for: visibility)
         }
         .onChange(of: externalFileIntake.sequence) { _, _ in
             ingestExternalFiles()
@@ -186,11 +250,21 @@ struct ContentView: View {
                     profileStore.setSelectedProfile(id: updated.id)
                 }
                 do {
-                    if let password {
-                        _ = try profileStore.savePassword(password, for: updated)
-                    }
-                    if let keyPassphrase {
-                        _ = try profileStore.saveKeyPassphrase(keyPassphrase, for: updated)
+                    var storedProfile = updated
+                    if updated.authType == .password {
+                        storedProfile = try profileStore.clearKeyPassphrase(for: storedProfile)
+                        if password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            storedProfile = try profileStore.clearPassword(for: storedProfile)
+                        } else {
+                            storedProfile = try profileStore.savePassword(password, for: storedProfile)
+                        }
+                    } else {
+                        storedProfile = try profileStore.clearPassword(for: storedProfile)
+                        if keyPassphrase.isEmpty {
+                            storedProfile = try profileStore.clearKeyPassphrase(for: storedProfile)
+                        } else {
+                            storedProfile = try profileStore.saveKeyPassphrase(keyPassphrase, for: storedProfile)
+                        }
                     }
                 } catch {
                     jobRunner.errorBanner = "Failed to save credentials: \(error.localizedDescription)"
@@ -202,75 +276,278 @@ struct ContentView: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        List {
-            Section {
-                ForEach(profileStore.profiles) { profile in
-                    Button {
-                        profileStore.setSelectedProfile(id: profile.id)
-                    } label: {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(profile.name)
-                                    .font(.callout)
-                                    .fontWeight(profile.id == profileStore.selectedProfileId ? .semibold : .regular)
-                                Text(
-                                    "\(profile.username)@\(profile.host)"
-                                )
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "server.rack")
-                                .foregroundStyle(profile.id == profileStore.selectedProfileId ? Color.accentColor : .secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button("Edit Profile…") {
-                            presentProfileEditor(for: profile)
-                        }
+        VStack(spacing: 0) {
+            List(selection: selectedProfileBinding) {
+                Section {
+                    ForEach(profileStore.profiles) { profile in
+                        profileSidebarRow(profile)
+                            .tag(profile.id)
+                            .contextMenu {
+                                Button("Edit Profile…") {
+                                    presentProfileEditor(for: profile)
+                                }
 
-                        Button("Delete Profile", role: .destructive) {
-                            deleteProfile(profile)
-                        }
-                        .disabled(!canDeleteProfile)
+                                Button("Delete Profile", role: .destructive) {
+                                    deleteProfile(profile)
+                                }
+                                .disabled(!canDeleteProfile)
+                            }
                     }
-                }
-            } header: {
-                HStack(spacing: 8) {
-                    Text("Profiles")
+                } header: {
+                    Text("PROFILES")
                         .font(Self.sectionHeaderFont)
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        addProfileFromSidebar()
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("New profile")
-
-                    Button {
-                        deleteSelectedProfile()
-                    } label: {
-                        Image(systemName: "minus")
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("Delete selected profile")
-                    .disabled(!canDeleteProfile)
+                        .textCase(nil)
                 }
-                .textCase(nil)
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(Self.navigatorBackground)
+            .environment(\.defaultMinListRowHeight, 30)
+
+            HStack(spacing: 8) {
+                paneHeaderButton(systemImage: "plus", help: "New profile") {
+                    addProfileFromSidebar()
+                }
+                paneHeaderButton(
+                    systemImage: "minus",
+                    help: "Delete selected profile",
+                    isDisabled: !canDeleteProfile
+                ) {
+                    deleteSelectedProfile()
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Self.chromeBackground)
+        }
+    }
+
+    private func profileSidebarRow(_ profile: ServerProfile) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profile.name)
+                    .font(.callout)
+                Text("\(profile.username)@\(profile.host)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+        } icon: {
+            Image(systemName: "server.rack")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Middle Workbench
+
+    private var middleWorkbench: some View {
+        VStack(spacing: 0) {
+            if profileStore.selectedProfile != nil {
+                filesArea
+                middleActionBar
+            } else if profileStore.isEmpty {
+                ContentUnavailableView {
+                    Label("No Profiles", systemImage: "server.rack")
+                } description: {
+                    Text("Create a profile to start uploading.")
+                } actions: {
+                    Button("Create Profile") {
+                        presentNewProfileEditor()
+                    }
+                    if !showProfilesDrawer {
+                        Button("Open Profiles Drawer") {
+                            setProfilesDrawerVisible(true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView {
+                    Label("No Profile Selected", systemImage: "server.rack")
+                } description: {
+                    Text("Select a profile to get started.")
+                } actions: {
+                    if !showProfilesDrawer {
+                        Button("Open Profiles Drawer") {
+                            setProfilesDrawerVisible(true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Self.editorBackground)
+    }
+
+    private var middleTopBar: some View {
+        HStack(spacing: 10) {
+            Group {
+                if let selectedProfile = profileStore.selectedProfile {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(selectedProfile.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text("\(selectedProfile.username)@\(selectedProfile.host)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .help("\(selectedProfile.username)@\(selectedProfile.host)")
+                } else if profileStore.isEmpty {
+                    Text("No Profiles")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No Profile Selected")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            Section {
-                if jobStore.jobs.isEmpty {
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Self.editorBackground)
+    }
+
+    private var middleActionBar: some View {
+        HStack(spacing: 8) {
+            Spacer()
+            Button("Clear") {
+                clearAllFiles()
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            .controlSize(.small)
+            .disabled(!canClearFiles)
+
+            if jobRunner.isRunning {
+                Button {
+                    jobRunner.cancel()
+                } label: {
+                    Label("Stop", systemImage: "stop.circle")
+                }
+                .help("Stop the current job")
+            } else {
+                if profileStore.selectedProfile != nil, !droppedFileItems.isEmpty {
+                    Button {
+                        startQueuedUpload()
+                    } label: {
+                        Label("Upload", systemImage: "arrow.up.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .help("Upload selected photos and import to WordPress")
+                }
+
+                if jobRunner.canRetryFailed, let profile = retryProfile {
+                    Button {
+                        jobRunner.retryFailed(profile: profile)
+                    } label: {
+                        Label("Retry Failed", systemImage: "arrow.counterclockwise")
+                    }
+                    .help("Retry failed files")
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Self.chromeBackground)
+    }
+
+    // MARK: - Operations Drawer
+
+    private var operationsDrawer: some View {
+        VStack(spacing: 0) {
+            Picker("Active Job", selection: $operationsTab) {
+                ForEach(OperationsTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Self.chromeBackground)
+
+            Group {
+                switch operationsTab {
+                case .activeJob:
+                    operationsProgressPanel
+                case .terminal:
+                    logViewer
+                case .history:
+                    jobHistoryView
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Self.inspectorBackground)
+    }
+
+    private var operationsProgressPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Active Job")
+                    .font(Self.sectionHeaderFont)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if jobRunner.isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if let job = jobRunner.currentJob {
+                jobStatusHeader(job: job)
+            } else {
+                Text("No job selected")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Self.chromeBackground)
+    }
+
+    private var selectedProfileJobs: [Job] {
+        guard let selectedId = profileStore.selectedProfileId else {
+            return jobStore.jobs
+        }
+        return jobStore.jobs.filter { $0.profileId == selectedId }
+    }
+
+    private var jobHistoryView: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("RECENT JOBS")
+                    .font(Self.sectionHeaderFont)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear") {
+                    clearJobHistory()
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .controlSize(.small)
+                .disabled(!canClearJobHistory)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Self.chromeBackground)
+
+            List {
+                if selectedProfileJobs.isEmpty {
                     Text("No jobs yet")
                         .foregroundStyle(.tertiary)
                         .font(.caption)
                 } else {
-                    ForEach(Array(jobStore.jobs.prefix(20))) { job in
+                    ForEach(Array(selectedProfileJobs.prefix(50))) { job in
                         Button {
                             jobRunner.loadJob(job)
                         } label: {
@@ -290,126 +567,102 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(jobRunner.isRunning)
-                    }
-                }
-            } header: {
-                HStack(spacing: 8) {
-                    Text("Job History")
-                        .font(Self.sectionHeaderFont)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Clear") {
-                        clearJobHistory()
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .controlSize(.small)
-                    .disabled(!canClearJobHistory)
-                }
-                .textCase(nil)
-            }
-        }
-        .listStyle(.sidebar)
-    }
-
-    // MARK: - Detail
-
-    private var detailView: some View {
-        VStack(spacing: 0) {
-            if profileStore.isEmpty {
-                ContentUnavailableView {
-                    Label("No Profiles", systemImage: "server.rack")
-                } description: {
-                    Text("Click + to create a profile.")
-                }
-            } else if profileStore.selectedProfile == nil {
-                ContentUnavailableView {
-                    Label("No Profile Selected", systemImage: "server.rack")
-                } description: {
-                    Text("Select a profile to get started.")
-                }
-            } else {
-                VStack(spacing: 0) {
-                    if let currentJob = jobRunner.currentJob {
-                        jobStatusHeader(job: currentJob)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                        Divider()
-                    }
-
-                    if showLogPane {
-                        VSplitView {
-                            filesArea
-                                .frame(minHeight: 220)
-                                .layoutPriority(1)
-
-                            logViewer
-                                .frame(minHeight: 120, idealHeight: 180)
-                        }
-                    } else {
-                        filesArea
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Combined Files Area
-
-    private var filesArea: some View {
-        let files = filesForDisplay()
-        return ZStack {
-            List {
-                Section {
-                    ForEach(files) { file in
-                        fileRow(for: file, job: jobRunner.currentJob)
-                    }
-                } header: {
-                    HStack {
-                        Text("Photos — \(files.count)")
-                            .font(Self.sectionHeaderFont)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Browse…") { choosePhotos() }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                            .controlSize(.small)
-                        Button("Clear") { clearAllFiles() }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                            .controlSize(.small)
-                            .disabled(!canClearFiles)
+                        .padding(.vertical, 1)
                     }
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: false))
-            .background(isDropTargeted ? Color.accentColor.opacity(0.08) : Color.clear)
-            .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
-                Task {
-                    let urls = await loadFileURLs(from: providers)
-                    await MainActor.run {
-                        addFiles(urls)
+            .scrollContentBackground(.hidden)
+            .background(Self.inspectorBackground)
+        }
+    }
+
+    // MARK: - Image Queue
+
+    private var filesArea: some View {
+        let files = filesForDisplay()
+        return VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button("Browse…") { choosePhotos() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .controlSize(.small)
+                Button("Clear") { clearAllFiles() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .controlSize(.small)
+                    .disabled(!canClearFiles)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Self.chromeBackground)
+
+            ZStack {
+                List(selection: $selectedFileRowIDs) {
+                    ForEach(files) { file in
+                        fileRow(for: file, job: jobRunner.currentJob)
+                            .tag(file.id)
+                            .contextMenu {
+                                if file.source == .queued {
+                                    Button("Delete") {
+                                        deleteFileRows(targeting: file)
+                                    }
+                                    .disabled(jobRunner.isRunning)
+                                }
+                            }
                     }
                 }
-                return true
-            }
-
-            if files.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.secondary)
-                    Text("Drop photos here")
-                        .font(.headline)
-                    Text("JPG, PNG, WebP, TIFF, AVIF")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Browse…") { choosePhotos() }
-                        .buttonStyle(.link)
-                        .font(.caption)
+                .listStyle(.inset(alternatesRowBackgrounds: false))
+                .scrollContentBackground(.hidden)
+                .background(Self.editorBackground)
+                .overlay {
+                    if isDropTargeted {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .padding(8)
+                    }
                 }
-                .padding()
+                .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+                    Task {
+                        let urls = await loadFileURLs(from: providers)
+                        await MainActor.run {
+                            addFiles(urls)
+                        }
+                    }
+                    return true
+                }
+                .onDeleteCommand {
+                    deleteSelectedFileRows()
+                }
+
+                if files.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.secondary)
+                        Text("Drop photos here")
+                            .font(.headline)
+                        Text("JPG, PNG, WebP, TIFF, AVIF")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Browse…") { choosePhotos() }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Self.chromeBackground.opacity(0.9))
+                    )
+                }
             }
+        }
+        .onChange(of: droppedFileItems) { _, _ in
+            pruneFileSelection()
+        }
+        .onChange(of: jobRunner.currentJob?.id) { _, _ in
+            pruneFileSelection()
         }
     }
 
@@ -433,18 +686,20 @@ struct ContentView: View {
         return HStack(spacing: 8) {
             FileThumbnailIcon(url: item.localURL, size: 20)
             Text(item.filename)
-                .font(.callout)
+                .font(.system(size: 12))
                 .lineLimit(1)
             Spacer()
             Text(Self.byteFormatter.string(fromByteCount: item.sizeBytes))
-                .font(.caption)
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
             perItemIndicator(for: file, state: progressState, in: job)
-            Text(progressLabel(for: progressState))
-                .font(.caption.monospaced())
+            Text(progressLabel(for: progressState).uppercased())
+                .font(.caption2.monospaced())
                 .foregroundStyle(progressColor(for: progressState))
+                .frame(width: 74, alignment: .trailing)
         }
         .help(file.source == .queued ? "Queued for next run" : (item.errorMessage ?? ""))
+        .contentShape(Rectangle())
     }
 
     private func perItemIndicator(for file: DisplayFile, state: FileProgressState, in job: Job?) -> some View {
@@ -530,7 +785,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(job.step.rawValue, systemImage: stepIcon(job.step))
-                    .font(.headline)
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(stepColor(job.step))
                 Spacer()
                 if jobRunner.isRunning {
@@ -542,21 +797,21 @@ struct ContentView: View {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                 GridRow {
                     Text("Upload")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                     ProgressView(value: job.uploadProgress)
                     Text("\(Int(job.uploadProgress * 100))%")
-                        .font(.caption.monospacedDigit())
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 36, alignment: .trailing)
                 }
                 GridRow {
                     Text("Import")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                     ProgressView(value: job.importProgress)
                     Text("\(Int(job.importProgress * 100))%")
-                        .font(.caption.monospacedDigit())
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 36, alignment: .trailing)
                 }
@@ -567,7 +822,7 @@ struct ContentView: View {
     private var logViewer: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Logs")
+                Text("TERMINAL")
                     .font(Self.sectionHeaderFont)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -607,6 +862,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .background(Self.chromeBackground)
 
             let bottomID = "log-bottom"
             ScrollViewReader { proxy in
@@ -642,47 +898,52 @@ struct ContentView: View {
                 }
             }
             .frame(minHeight: 80)
-            .background(Color(.textBackgroundColor))
+            .background(Color(nsColor: .textBackgroundColor))
         }
     }
 
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            if jobRunner.isRunning {
-                Button {
-                    jobRunner.cancel()
-                } label: {
-                    Label("Stop", systemImage: "stop.circle")
-                }
-                .help("Stop the current job")
-            } else {
-                if profileStore.selectedProfile != nil, !droppedFiles.isEmpty {
-                    Button {
-                        startQueuedUpload()
-                    } label: {
-                        Label("Upload", systemImage: "arrow.up.circle.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
-                    .help("Upload selected photos and import to WordPress")
-                }
-
-                if jobRunner.canRetryFailed, let profile = retryProfile {
-                    Button {
-                        jobRunner.retryFailed(profile: profile)
-                    } label: {
-                        Label("Retry Failed", systemImage: "arrow.counterclockwise")
-                    }
-                    .help("Retry failed files")
-                }
-            }
+    private func paneHeaderButton(
+        systemImage: String,
+        help: String,
+        isDisabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 16)
+                .padding(4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
         }
+        .buttonStyle(.plain)
+        .controlSize(.small)
+        .disabled(isDisabled)
+        .help(help)
     }
 
     // MARK: - Helpers
+
+    private func syncSplitVisibilityFromBindings() {
+        splitViewVisibility = showProfilesDrawer ? .all : .detailOnly
+    }
+
+    private func isSidebarVisible(for visibility: NavigationSplitViewVisibility) -> Bool {
+        switch visibility {
+        case .detailOnly:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func setProfilesDrawerVisible(_ isVisible: Bool) {
+        showProfilesDrawer = isVisible
+        splitViewVisibility = isVisible ? .all : .detailOnly
+    }
 
     private var retryProfile: ServerProfile? {
         guard let job = jobRunner.currentJob else { return nil }
@@ -756,10 +1017,14 @@ struct ContentView: View {
         let imageFiles = resolveImageFileURLs(from: urls)
         guard !imageFiles.isEmpty else { return }
 
-        let existing = Set(droppedFiles.map(\.path))
-        let additions = imageFiles.filter { !existing.contains($0.path) }
-        droppedFiles.append(contentsOf: additions)
-        droppedFileItems = droppedFiles.compactMap(FileItem.fromURL)
+        var existing = Set(droppedFileItems.map { $0.localURL.standardizedFileURL.path })
+        for url in imageFiles {
+            let key = url.standardizedFileURL.path
+            guard existing.insert(key).inserted else { continue }
+            guard let item = FileItem.fromURL(url) else { continue }
+            droppedFileItems.append(item)
+        }
+        pruneFileSelection()
     }
 
     private func ingestExternalFiles() {
@@ -768,21 +1033,62 @@ struct ContentView: View {
 
     private func clearAllFiles() {
         guard !jobRunner.isRunning else { return }
-        droppedFiles.removeAll()
         droppedFileItems.removeAll()
+        selectedFileRowIDs.removeAll()
         jobRunner.currentJob = nil
     }
 
     private func startQueuedUpload() {
         guard let profile = profileStore.selectedProfile else { return }
-        let queued = droppedFiles
+        let queued = droppedFileItems.map(\.localURL)
         guard !queued.isEmpty else { return }
 
         jobRunner.start(profile: profile, fileURLs: queued)
         if jobRunner.isRunning {
-            droppedFiles.removeAll()
             droppedFileItems.removeAll()
+            selectedFileRowIDs.removeAll()
+            showOperationsDrawer = true
+            operationsTab = .activeJob
         }
+    }
+
+    private func deleteSelectedFileRows() {
+        guard !jobRunner.isRunning else { return }
+        guard !selectedFileRowIDs.isEmpty else { return }
+        deleteQueuedFiles(forRowIDs: selectedFileRowIDs)
+    }
+
+    private func deleteFileRows(targeting file: DisplayFile) {
+        guard !jobRunner.isRunning else { return }
+        guard file.source == .queued else { return }
+
+        let targetRowIDs: Set<String>
+        if selectedFileRowIDs.contains(file.id) {
+            targetRowIDs = selectedFileRowIDs
+        } else {
+            targetRowIDs = [file.id]
+        }
+        deleteQueuedFiles(forRowIDs: targetRowIDs)
+    }
+
+    private func deleteQueuedFiles(forRowIDs rowIDs: Set<String>) {
+        guard !rowIDs.isEmpty else { return }
+
+        let queuedItemIDs = Set(
+            filesForDisplay()
+                .filter { rowIDs.contains($0.id) && $0.source == .queued }
+                .map(\.item.id)
+        )
+        guard !queuedItemIDs.isEmpty else { return }
+
+        droppedFileItems.removeAll { queuedItemIDs.contains($0.id) }
+        selectedFileRowIDs.subtract(rowIDs)
+        pruneFileSelection()
+    }
+
+    private func pruneFileSelection() {
+        let validRowIDs = Set(filesForDisplay().map(\.id))
+        selectedFileRowIDs.formIntersection(validRowIDs)
     }
 
     private func copyReport() {

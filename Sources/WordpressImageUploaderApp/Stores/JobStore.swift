@@ -25,11 +25,6 @@ final class JobStore {
         save()
     }
 
-    func remove(jobId: UUID) {
-        jobs.removeAll { $0.id == jobId }
-        save()
-    }
-
     func clear() {
         jobs.removeAll()
         save()

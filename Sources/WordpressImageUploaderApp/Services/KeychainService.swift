@@ -1,10 +1,22 @@
 import Foundation
 import Security
 
-enum KeychainServiceError: Error {
+enum KeychainServiceError: Error, LocalizedError {
     case encodingFailed
     case unexpectedData
     case osStatus(OSStatus)
+
+    var errorDescription: String? {
+        switch self {
+        case .encodingFailed:
+            return "Failed to encode secret for Keychain storage."
+        case .unexpectedData:
+            return "Unexpected data returned from Keychain."
+        case let .osStatus(status):
+            let message = (SecCopyErrorMessageString(status, nil) as String?) ?? "OSStatus \(status)"
+            return "Keychain error: \(message)"
+        }
+    }
 }
 
 struct KeychainService {

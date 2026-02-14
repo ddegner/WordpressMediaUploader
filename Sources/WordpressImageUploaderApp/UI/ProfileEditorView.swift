@@ -4,13 +4,12 @@ struct ProfileEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let jobRunner: JobRunner
-    let onSave: (ServerProfile, String?, String?) -> Void
+    let onSave: (ServerProfile, String, String) -> Void
 
     @State private var profile: ServerProfile
     @State private var password: String
     @State private var keyPassphrase: String
     @State private var portText: String
-    @State private var bandwidthLimitText: String
     @State private var showKeyImporter = false
 
     @State private var isTesting = false
@@ -22,7 +21,7 @@ struct ProfileEditorView: View {
         initialPassword: String?,
         initialKeyPassphrase: String?,
         jobRunner: JobRunner,
-        onSave: @escaping (ServerProfile, String?, String?) -> Void
+        onSave: @escaping (ServerProfile, String, String) -> Void
     ) {
         self.jobRunner = jobRunner
         self.onSave = onSave
@@ -30,67 +29,35 @@ struct ProfileEditorView: View {
         _password = State(initialValue: initialPassword ?? "")
         _keyPassphrase = State(initialValue: initialKeyPassphrase ?? "")
         _portText = State(initialValue: String(profile.port))
-        _bandwidthLimitText = State(initialValue: profile.bwLimitKBps.map(String.init) ?? "")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Profile Setup")
-                .font(.title3.weight(.semibold))
-
-            GroupBox {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        connectionSection
-                        Divider()
-                        wordpressSection
-                        Divider()
-                        defaultsSection
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                }
+        NavigationStack {
+            Form {
+                connectionSection
+                wordpressSection
+                defaultsSection
+                connectionTestSection
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Button(isTesting ? "Testing…" : "Test Connection") {
-                        runConnectionTest()
+            .formStyle(.grouped)
+            .navigationTitle("Profile Editor")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
                     }
-                    .disabled(isTesting || !canSave)
-
-                    if !testLines.isEmpty {
-                        Image(systemName: testSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundStyle(testSuccess ? .green : .red)
-                        Text(testSuccess ? "Passed" : "Failed")
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(testSuccess ? .green : .red)
+                    .keyboardShortcut(.cancelAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saveAndClose()
                     }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave)
                 }
-
-                if !testLines.isEmpty {
-                    ForEach(Array(testLines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.caption.monospaced())
-                    }
-                }
-            }
-
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-
-                Spacer()
-
-                Button("Save") {
-                    saveAndClose()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canSave)
             }
         }
-        .padding(18)
         .fileImporter(
             isPresented: $showKeyImporter,
             allowedContentTypes: [.data],
@@ -101,75 +68,45 @@ struct ProfileEditorView: View {
             }
             profile.keyPath = url.path
         }
-        .frame(width: 640, height: 620)
+        .frame(width: 720, height: 760)
     }
 
     // MARK: - Connection
 
     private var connectionSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Server")
-                .font(.headline)
+        Section(header: Text("Connection")) {
+            TextField("Profile Name", text: $profile.name, prompt: Text("My WordPress Server"))
+            TextField("Host", text: $profile.host, prompt: Text("example.com"))
+            TextField("Username", text: $profile.username, prompt: Text("deploy"))
 
-            labeledTextField("Profile Name", text: $profile.name, placeholder: "My WordPress Server")
-            labeledTextField("Host", text: $profile.host, placeholder: "example.com")
-            labeledTextField("Username", text: $profile.username, placeholder: "deploy")
-
-            HStack(spacing: 10) {
-                Text("Port")
-                    .frame(width: 150, alignment: .leading)
-                TextField("22", text: portBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 100)
-                Spacer()
+            LabeledContent("Port") {
+                TextField("", text: portBinding, prompt: Text("22"))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
             }
 
-            Divider()
-
-            Text("Authentication")
-                .font(.headline)
-
-            Picker("Method", selection: $profile.authType) {
+            Picker("Authentication", selection: $profile.authType) {
                 ForEach(AuthenticationType.allCases) { auth in
                     Text(auth.displayName).tag(auth)
                 }
             }
+            .pickerStyle(.menu)
 
             if profile.authType == .sshKey {
-                HStack(spacing: 10) {
-                    Text("Private Key")
-                        .frame(width: 150, alignment: .leading)
+                HStack {
                     TextField("Optional", text: Binding(
                         get: { profile.keyPath ?? "" },
                         set: { profile.keyPath = trimmed($0).isEmpty ? nil : $0 }
                     ))
-                    .textFieldStyle(.roundedBorder)
+                    .font(.body.monospaced())
+
                     Button("Choose…") {
                         showKeyImporter = true
                     }
                 }
-
-                HStack(spacing: 10) {
-                    Text("Key Passphrase")
-                        .frame(width: 150, alignment: .leading)
-                    SecureField("Optional", text: $keyPassphrase)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                Text("Recommended: use ssh-agent for key auth.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SecureField("Key Passphrase (optional)", text: $keyPassphrase)
             } else {
-                HStack(spacing: 10) {
-                    Text("Password")
-                        .frame(width: 150, alignment: .leading)
-                    SecureField("Required", text: $password)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                Text("Password is stored in Keychain and used via SSH_ASKPASS.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SecureField("Password", text: $password)
             }
         }
     }
@@ -177,54 +114,46 @@ struct ProfileEditorView: View {
     // MARK: - WordPress
 
     private var wordpressSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("WordPress")
-                .font(.headline)
-
-            labeledTextField("WP Root Path", text: $profile.wpRootPath, placeholder: "/var/www/html")
-
-            Text("This is the directory containing wp-config.php on the remote server.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        Section(header: Text("WordPress")) {
+            TextField("WP Root Path", text: $profile.wpRootPath, prompt: Text("/var/www/html"))
+                .font(.body.monospaced())
         }
     }
 
     // MARK: - Defaults
 
     private var defaultsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Defaults")
-                .font(.headline)
-
-            labeledTextField("Staging Root", text: $profile.remoteStagingRoot, placeholder: "~/wp-media-import")
-
-            HStack(spacing: 10) {
-                Text("Bandwidth Limit")
-                    .frame(width: 150, alignment: .leading)
-                TextField("Unlimited", text: bandwidthLimitBinding)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 140)
-                Text("KB/s")
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
+        Section(header: Text("Defaults")) {
+            TextField("Staging Root", text: $profile.remoteStagingRoot, prompt: Text("~/wp-media-import"))
+                .font(.body.monospaced())
 
             Toggle("Keep remote files after success", isOn: $profile.keepRemoteFiles)
-
-            Text("Defaults: port 22, staging ~/wp-media-import.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
-    // MARK: - Helpers
+    private var connectionTestSection: some View {
+        Section(header: Text("Validation")) {
+            HStack {
+                Button(isTesting ? "Testing…" : "Test Connection") {
+                    runConnectionTest()
+                }
+                .disabled(isTesting || !canSave)
 
-    private func labeledTextField(_ label: String, text: Binding<String>, placeholder: String) -> some View {
-        HStack(spacing: 10) {
-            Text(label)
-                .frame(width: 150, alignment: .leading)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
+                if !testLines.isEmpty {
+                    Label(testSuccess ? "Passed" : "Failed", systemImage: testSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(testSuccess ? .green : .red)
+                }
+                Spacer()
+            }
+
+            if !testLines.isEmpty {
+                ForEach(Array(testLines.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
     }
 
@@ -265,16 +194,12 @@ struct ProfileEditorView: View {
 
     private func saveAndClose() {
         profile.port = Int(portText) ?? 0
-        if let limit = Int(bandwidthLimitText), limit > 0 {
-            profile.bwLimitKBps = limit
-        } else {
-            profile.bwLimitKBps = nil
-        }
+        profile.bwLimitKBps = nil
 
         onSave(
             profile,
-            password.isEmpty ? nil : password,
-            keyPassphrase.isEmpty ? nil : keyPassphrase
+            password,
+            keyPassphrase
         )
         dismiss()
     }
@@ -286,21 +211,6 @@ struct ProfileEditorView: View {
                 let digits = newValue.filter(\.isNumber)
                 portText = digits
                 profile.port = Int(digits) ?? 0
-            }
-        )
-    }
-
-    private var bandwidthLimitBinding: Binding<String> {
-        Binding(
-            get: { bandwidthLimitText },
-            set: { newValue in
-                let digits = newValue.filter(\.isNumber)
-                bandwidthLimitText = digits
-                if let limit = Int(digits), limit > 0 {
-                    profile.bwLimitKBps = limit
-                } else {
-                    profile.bwLimitKBps = nil
-                }
             }
         )
     }

@@ -26,11 +26,6 @@ final class ExternalFileIntake {
 }
 
 final class DockFileOpenDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        // Follow macOS appearance (Light/Dark) automatically.
-        NSApp.appearance = nil
-    }
-
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
             ExternalFileIntake.shared.enqueue(urls)

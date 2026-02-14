@@ -37,7 +37,7 @@ struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
         host: "",
         port: 22,
         username: "",
-        authType: .sshKey,
+        authType: .password,
         keyPath: nil,
         keyPassphraseKeychainId: nil,
         passwordKeychainId: nil,

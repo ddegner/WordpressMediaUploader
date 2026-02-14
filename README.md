@@ -4,7 +4,9 @@ A native macOS app built in SwiftUI for batch-uploading images to a remote WordP
 
 Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to handle large media libraries efficiently.
 
-**Version 0.5** · macOS 14+
+**Version 0.6** · macOS 14+
+
+![Wordpress Media Uploader screenshot](screenshots/app-screenshot.png)
 
 ## Features
 
@@ -48,7 +50,7 @@ Or open the Xcode project and run from there:
 
 ```bash
 xcodegen generate
-open "Wordpress Media Uploader.xcodeproj"
+open "WordpressMediaUploader.xcodeproj"
 ```
 
 ## How It Works
