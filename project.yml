@@ -26,6 +26,7 @@ targets:
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         INFOPLIST_KEY_NSRequiresAquaSystemAppearance: NO
         PRODUCT_NAME: Wordpress Media Uploader
+        PRODUCT_MODULE_NAME: WordpressMediaUploaderApp
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.5"
         CODE_SIGN_STYLE: Automatic
@@ -40,6 +41,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.degner.WordpressMediaUploaderTests
         GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Wordpress Media Uploader.app/Contents/MacOS/Wordpress Media Uploader"
 schemes:
   WordpressMediaUploader:
     build:

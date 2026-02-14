@@ -14,15 +14,14 @@ final class ProfileStore {
 
     init() {
         load()
-        if profiles.isEmpty {
-            let profile = ServerProfile.default
-            profiles = [profile]
-            selectedProfileId = profile.id
-            save()
-        } else if selectedProfileId == nil {
+        if !profiles.isEmpty, selectedProfileId == nil {
             selectedProfileId = profiles.first?.id
             save()
         }
+    }
+
+    var isEmpty: Bool {
+        profiles.isEmpty
     }
 
     var selectedProfile: ServerProfile? {

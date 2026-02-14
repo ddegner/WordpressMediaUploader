@@ -1,24 +1,5 @@
 import SwiftUI
 
-private enum ProfileWizardStep: Int, CaseIterable, Identifiable {
-    case connection
-    case wordpress
-    case defaults
-
-    var id: Int { rawValue }
-
-    var title: String {
-        switch self {
-        case .connection:
-            return "Connection"
-        case .wordpress:
-            return "WordPress"
-        case .defaults:
-            return "Defaults"
-        }
-    }
-}
-
 struct ProfileEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -32,7 +13,6 @@ struct ProfileEditorView: View {
     @State private var bandwidthLimitText: String
     @State private var showKeyImporter = false
 
-    @State private var currentStep: ProfileWizardStep = .connection
     @State private var isTesting = false
     @State private var testLines: [String] = []
     @State private var testSuccess = false
@@ -58,24 +38,14 @@ struct ProfileEditorView: View {
             Text("Profile Setup")
                 .font(.title3.weight(.semibold))
 
-            Picker("Step", selection: $currentStep) {
-                ForEach(ProfileWizardStep.allCases) { step in
-                    Text(step.title).tag(step)
-                }
-            }
-            .pickerStyle(.segmented)
-
             GroupBox {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        switch currentStep {
-                        case .connection:
-                            connectionStep
-                        case .wordpress:
-                            wordpressStep
-                        case .defaults:
-                            defaultsStep
-                        }
+                        connectionSection
+                        Divider()
+                        wordpressSection
+                        Divider()
+                        defaultsSection
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
@@ -87,7 +57,7 @@ struct ProfileEditorView: View {
                     Button(isTesting ? "Testing…" : "Test Connection") {
                         runConnectionTest()
                     }
-                    .disabled(isTesting || !connectionStepValid)
+                    .disabled(isTesting || !canSave)
 
                     if !testLines.isEmpty {
                         Image(systemName: testSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -113,24 +83,11 @@ struct ProfileEditorView: View {
 
                 Spacer()
 
-                Button("Back") {
-                    goBack()
+                Button("Save") {
+                    saveAndClose()
                 }
-                .disabled(currentStep == .connection)
-
-                if currentStep == .defaults {
-                    Button("Save") {
-                        saveAndClose()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canSave)
-                } else {
-                    Button("Next") {
-                        goNext()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canAdvance)
-                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave)
             }
         }
         .padding(18)
@@ -147,7 +104,9 @@ struct ProfileEditorView: View {
         .frame(width: 640, height: 620)
     }
 
-    private var connectionStep: some View {
+    // MARK: - Connection
+
+    private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Server")
                 .font(.headline)
@@ -215,7 +174,9 @@ struct ProfileEditorView: View {
         }
     }
 
-    private var wordpressStep: some View {
+    // MARK: - WordPress
+
+    private var wordpressSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("WordPress")
                 .font(.headline)
@@ -228,7 +189,9 @@ struct ProfileEditorView: View {
         }
     }
 
-    private var defaultsStep: some View {
+    // MARK: - Defaults
+
+    private var defaultsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Defaults")
                 .font(.headline)
@@ -254,23 +217,14 @@ struct ProfileEditorView: View {
         }
     }
 
+    // MARK: - Helpers
+
     private func labeledTextField(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         HStack(spacing: 10) {
             Text(label)
                 .frame(width: 150, alignment: .leading)
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
-        }
-    }
-
-    private var canAdvance: Bool {
-        switch currentStep {
-        case .connection:
-            return connectionStepValid
-        case .wordpress:
-            return wordpressStepValid
-        case .defaults:
-            return defaultsStepValid
         }
     }
 
@@ -307,16 +261,6 @@ struct ProfileEditorView: View {
             return true
         }
         return FileManager.default.fileExists(atPath: keyPath)
-    }
-
-    private func goBack() {
-        guard let previous = ProfileWizardStep(rawValue: currentStep.rawValue - 1) else { return }
-        currentStep = previous
-    }
-
-    private func goNext() {
-        guard let next = ProfileWizardStep(rawValue: currentStep.rawValue + 1), canAdvance else { return }
-        currentStep = next
     }
 
     private func saveAndClose() {
@@ -367,7 +311,11 @@ struct ProfileEditorView: View {
         testSuccess = false
 
         Task {
-            let result = await jobRunner.testConnection(profile: profile)
+            let result = await jobRunner.testConnection(
+                profile: profile,
+                password: password.isEmpty ? nil : password,
+                keyPassphrase: keyPassphrase.isEmpty ? nil : keyPassphrase
+            )
             await MainActor.run {
                 testLines = result.checks
                 testSuccess = result.success

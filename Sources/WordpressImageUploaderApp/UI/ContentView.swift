@@ -154,6 +154,9 @@ struct ContentView: View {
         .toolbar { toolbarContent }
         .onAppear {
             ingestExternalFiles()
+            if profileStore.isEmpty {
+                presentNewProfileEditor()
+            }
         }
         .onChange(of: externalFileIntake.sequence) { _, _ in
             ingestExternalFiles()
@@ -176,7 +179,12 @@ struct ContentView: View {
                 initialKeyPassphrase: draft.initialKeyPassphrase,
                 jobRunner: jobRunner
             ) { updated, password, keyPassphrase in
-                profileStore.update(updated)
+                if profileStore.profiles.contains(where: { $0.id == updated.id }) {
+                    profileStore.update(updated)
+                } else {
+                    profileStore.profiles.append(updated)
+                    profileStore.setSelectedProfile(id: updated.id)
+                }
                 do {
                     if let password {
                         _ = try profileStore.savePassword(password, for: updated)
@@ -308,11 +316,17 @@ struct ContentView: View {
 
     private var detailView: some View {
         VStack(spacing: 0) {
-            if profileStore.selectedProfile == nil {
+            if profileStore.isEmpty {
+                ContentUnavailableView {
+                    Label("No Profiles", systemImage: "server.rack")
+                } description: {
+                    Text("Click + to create a profile.")
+                }
+            } else if profileStore.selectedProfile == nil {
                 ContentUnavailableView {
                     Label("No Profile Selected", systemImage: "server.rack")
                 } description: {
-                    Text("Create or select a profile to get started.")
+                    Text("Select a profile to get started.")
                 }
             } else {
                 VStack(spacing: 0) {
@@ -676,7 +690,7 @@ struct ContentView: View {
     }
 
     private var canDeleteProfile: Bool {
-        profileStore.profiles.count > 1 && profileStore.selectedProfile != nil && !jobRunner.isRunning
+        profileStore.selectedProfile != nil && !jobRunner.isRunning
     }
 
     private var canClearJobHistory: Bool {
@@ -684,10 +698,18 @@ struct ContentView: View {
     }
 
     private func addProfileFromSidebar() {
-        profileStore.addNewProfile()
-        if let selected = profileStore.selectedProfile {
-            presentProfileEditor(for: selected)
-        }
+        presentNewProfileEditor()
+    }
+
+    private func presentNewProfileEditor() {
+        var newProfile = ServerProfile.default
+        newProfile.id = UUID()
+        newProfile.name = "New Profile"
+        profileEditorDraft = ProfileEditorDraft(
+            profile: newProfile,
+            initialPassword: nil,
+            initialKeyPassphrase: nil
+        )
     }
 
     private func deleteSelectedProfile() {
@@ -696,7 +718,7 @@ struct ContentView: View {
     }
 
     private func deleteProfile(_ profile: ServerProfile) {
-        guard profileStore.profiles.count > 1, !jobRunner.isRunning else { return }
+        guard !jobRunner.isRunning else { return }
         profileStore.deleteProfile(id: profile.id)
     }
 

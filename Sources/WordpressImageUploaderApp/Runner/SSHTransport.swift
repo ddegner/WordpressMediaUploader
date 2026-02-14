@@ -94,6 +94,58 @@ final class SSHTransport {
         }
     }
 
+    func makeAuthContext(for profile: ServerProfile, password: String?, keyPassphrase: String?) throws -> SSHAuthContext {
+        switch profile.authType {
+        case .sshKey:
+            var args: [String] = []
+            if let keyPath = profile.keyPath,
+               !keyPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                args += ["-i", keyPath]
+            }
+
+            if let passphrase = keyPassphrase, !passphrase.isEmpty {
+                let scriptURL = try createAskPassScript(secret: passphrase)
+                args = [
+                    "-o", "BatchMode=no"
+                ] + args
+
+                let env = [
+                    "SSH_ASKPASS": scriptURL.path,
+                    "SSH_ASKPASS_REQUIRE": "force",
+                    "DISPLAY": "1"
+                ]
+                return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: scriptURL)
+            }
+
+            args = [
+                "-o", "BatchMode=yes"
+            ] + args
+            return SSHAuthContext(additionalSSHArgs: args, environment: nil, askPassScriptURL: nil)
+
+        case .password:
+            guard let pw = password, !pw.isEmpty else {
+                throw JobRunnerError.profileIncomplete("Password auth selected, but no password provided")
+            }
+            let scriptURL = try createAskPassScript(secret: pw)
+
+            let args = [
+                "-o", "BatchMode=no",
+                "-o", "PreferredAuthentications=password,keyboard-interactive",
+                "-o", "PubkeyAuthentication=no",
+                "-o", "NumberOfPasswordPrompts=1"
+            ]
+
+            let env = [
+                "SSH_ASKPASS": scriptURL.path,
+                "SSH_ASKPASS_REQUIRE": "force",
+                "DISPLAY": "1"
+            ]
+
+            return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: scriptURL)
+        }
+    }
+
     // MARK: - SSH execution
 
     func runSSH(

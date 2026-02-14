@@ -1,12 +1,14 @@
 # Wordpress Media Uploader
 
-A macOS app for batch-uploading images to a remote WordPress server via `rsync`, `ssh`, and `wp-cli`.
+A native macOS app built in SwiftUI for batch-uploading images to a remote WordPress server.
+
+Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to handle large media libraries efficiently.
 
 **Version 0.5** · macOS 14+
 
 ## Features
 
-- **3-step profile wizard** — connection, WordPress path, import defaults
+- **Single-window profile setup** — connection, WordPress path, import defaults
 - **Multiple server profiles** with persistent selection
 - **Credentials stored in Keychain** — password auth and optional key passphrase
 - **SSH auth modes** — key-based (agent-friendly) or password via `SSH_ASKPASS`

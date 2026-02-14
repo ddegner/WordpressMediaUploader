@@ -177,7 +177,7 @@ final class JobRunner {
         errorBanner = nil
     }
 
-    func testConnection(profile: ServerProfile) async -> ProfileTestResult {
+    func testConnection(profile: ServerProfile, password: String?, keyPassphrase: String?) async -> ProfileTestResult {
         var checks: [String] = []
         var authContext: SSHAuthContext?
         defer {
@@ -185,8 +185,8 @@ final class JobRunner {
         }
 
         do {
-            try validateProfile(profile)
-            let auth = try transport.makeAuthContext(for: profile)
+            try validateProfile(profile, password: password)
+            let auth = try transport.makeAuthContext(for: profile, password: password, keyPassphrase: keyPassphrase)
             authContext = auth
 
             let home = try await transport.fetchRemoteHomeDirectory(profile: profile, auth: auth, writer: nil)
@@ -724,7 +724,7 @@ final class JobRunner {
         return items
     }
 
-    func validateProfile(_ profile: ServerProfile) throws {
+    func validateProfile(_ profile: ServerProfile, password: String? = nil) throws {
         if profile.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw JobRunnerError.profileIncomplete("Host is required")
         }
@@ -742,8 +742,8 @@ final class JobRunner {
         }
 
         if profile.authType == .password {
-            let savedPassword = profileStore.loadPassword(for: profile)
-            if (savedPassword ?? "").isEmpty {
+            let effectivePassword = password ?? profileStore.loadPassword(for: profile) ?? ""
+            if effectivePassword.isEmpty {
                 throw JobRunnerError.profileIncomplete("Password auth selected, but no password is stored in Keychain")
             }
         }
