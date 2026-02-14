@@ -25,6 +25,7 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         INFOPLIST_KEY_NSRequiresAquaSystemAppearance: NO
+        PRODUCT_NAME: Wordpress Media Uploader
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.5"
         CODE_SIGN_STYLE: Automatic
