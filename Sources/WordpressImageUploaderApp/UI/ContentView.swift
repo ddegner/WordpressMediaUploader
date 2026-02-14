@@ -93,11 +93,22 @@ private struct FileThumbnailIcon: View {
     }
 }
 
+private extension Color {
+    init(hexRGB: UInt32) {
+        let red = Double((hexRGB >> 16) & 0xFF) / 255.0
+        let green = Double((hexRGB >> 8) & 0xFF) / 255.0
+        let blue = Double(hexRGB & 0xFF) / 255.0
+        self.init(.sRGB, red: red, green: green, blue: blue, opacity: 1)
+    }
+}
+
 struct ContentView: View {
+    private static let profilesDrawerWidth: CGFloat = 260
+    private static let operationsDrawerWidth: CGFloat = 320
+    private static let workbenchMinWidth: CGFloat = 180
+
     private static let sectionHeaderFont: Font = .caption2.weight(.semibold)
-    private static let navigatorBackground = Color(nsColor: .windowBackgroundColor)
     private static let editorBackground = Color(nsColor: .textBackgroundColor)
-    private static let inspectorBackground = Color(nsColor: .windowBackgroundColor)
     private static let chromeBackground = Color(nsColor: .windowBackgroundColor)
 
     private struct ProfileEditorDraft: Identifiable {
@@ -155,75 +166,184 @@ struct ContentView: View {
             case .history: return "Job History"
             }
         }
+
+        var systemImage: String {
+            switch self {
+            case .activeJob: return "play.fill"
+            case .terminal: return "chevron.left.forwardslash.chevron.right"
+            case .history: return "clock"
+            }
+        }
+    }
+
+    private struct OperationsTabsControl: NSViewRepresentable {
+        @Binding var selection: OperationsTab
+        let tabs: [OperationsTab]
+
+        final class Coordinator: NSObject {
+            var parent: OperationsTabsControl
+
+            init(parent: OperationsTabsControl) {
+                self.parent = parent
+            }
+
+            @MainActor
+            @objc func selectionChanged(_ sender: NSSegmentedControl) {
+                guard sender.selectedSegment >= 0, sender.selectedSegment < parent.tabs.count else { return }
+                parent.selection = parent.tabs[sender.selectedSegment]
+            }
+        }
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(parent: self)
+        }
+
+        func makeNSView(context: Context) -> NSSegmentedControl {
+            let control = NSSegmentedControl()
+            control.segmentStyle = .separated
+            control.trackingMode = .selectOne
+            control.controlSize = .large
+            control.segmentDistribution = .fillEqually
+            control.target = context.coordinator
+            control.action = #selector(Coordinator.selectionChanged(_:))
+            configure(control)
+            return control
+        }
+
+        func updateNSView(_ control: NSSegmentedControl, context: Context) {
+            context.coordinator.parent = self
+            configure(control)
+            control.selectedSegment = tabs.firstIndex(of: selection) ?? -1
+        }
+
+        private func configure(_ control: NSSegmentedControl) {
+            if control.segmentCount != tabs.count {
+                control.segmentCount = tabs.count
+            }
+
+            let symbolConfig = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+            for (index, tab) in tabs.enumerated() {
+                control.setLabel("", forSegment: index)
+                control.setToolTip(tab.title, forSegment: index)
+                let image = NSImage(
+                    systemSymbolName: tab.systemImage,
+                    accessibilityDescription: tab.title
+                )?.withSymbolConfiguration(symbolConfig)
+                control.setImage(image, forSegment: index)
+                control.setImageScaling(.scaleProportionallyDown, forSegment: index)
+            }
+        }
     }
 
     @Bindable var profileStore: ProfileStore
     @Bindable var jobStore: JobStore
     @Bindable var jobRunner: JobRunner
     @Bindable var externalFileIntake: ExternalFileIntake
-    @Binding var showProfilesDrawer: Bool
-    @Binding var showOperationsDrawer: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.controlActiveState) private var controlActiveState
 
     @State private var droppedFileItems: [FileItem] = []
     @State private var isDropTargeted = false
     @State private var selectedFileRowIDs: Set<String> = []
     @State private var profileEditorDraft: ProfileEditorDraft?
     @State private var showErrorAlert = false
+    @State private var showProfilesDrawer = true
+    @State private var showOperationsDrawer = true
+    @State private var selectedProfileId: UUID?
     @State private var operationsTab: OperationsTab = .activeJob
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
 
-    private var selectedProfileBinding: Binding<UUID?> {
-        Binding(
-            get: { profileStore.selectedProfileId },
-            set: { profileStore.setSelectedProfile(id: $0) }
-        )
+    private var selectedProfile: ServerProfile? {
+        guard let selectedProfileId else { return nil }
+        return profileStore.profiles.first { $0.id == selectedProfileId }
+    }
+
+    private var minimumWindowWidth: CGFloat {
+        Self.profilesDrawerWidth + Self.workbenchMinWidth + Self.operationsDrawerWidth
+    }
+
+    private var drawerBackground: Color {
+        switch colorScheme {
+        case .dark:
+            return Color(hexRGB: isWindowFocused ? 0x2A2A2C : 0x303033)
+        case .light:
+            return Color(hexRGB: isWindowFocused ? 0xF8F8F8 : 0xF4F4F4)
+        @unknown default:
+            return Color(hexRGB: isWindowFocused ? 0xF8F8F8 : 0xF4F4F4)
+        }
+    }
+
+    private var isWindowFocused: Bool {
+        controlActiveState != .inactive
     }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 360)
-                .background(Self.navigatorBackground)
+                .navigationSplitViewColumnWidth(
+                    min: Self.profilesDrawerWidth,
+                    ideal: Self.profilesDrawerWidth,
+                    max: Self.profilesDrawerWidth
+                )
+                .background(drawerBackground)
         } detail: {
             middleWorkbench
-                .frame(maxWidth: .infinity)
+                .frame(minWidth: Self.workbenchMinWidth, maxWidth: .infinity)
                 .background(Self.editorBackground)
                 .safeAreaInset(edge: .top, spacing: 0) {
                     middleTopBar
                 }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        operationsDrawerToggleButton
+                    }
+                }
         }
+        .toolbarRole(.editor)
         .navigationSplitViewStyle(.balanced)
         .inspector(isPresented: $showOperationsDrawer) {
             operationsDrawer
-                .background(Self.inspectorBackground)
+                .background(drawerBackground)
         }
-        .inspectorColumnWidth(320)
+        .inspectorColumnWidth(
+            min: Self.operationsDrawerWidth,
+            ideal: Self.operationsDrawerWidth,
+            max: Self.operationsDrawerWidth
+        )
+        .frame(minWidth: minimumWindowWidth, minHeight: 600)
         .background(Self.editorBackground)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showOperationsDrawer.toggle()
-                } label: {
-                    Image(systemName: "sidebar.right")
-                }
-                .help(showOperationsDrawer ? "Hide operations drawer" : "Show operations drawer")
-            }
-        }
+        .focusedSceneValue(\.showProfilesDrawerBinding, $showProfilesDrawer)
+        .focusedSceneValue(\.showOperationsDrawerBinding, $showOperationsDrawer)
         .onAppear {
-            syncSplitVisibilityFromBindings()
+            splitViewVisibility = showProfilesDrawer ? .all : .detailOnly
             ingestExternalFiles()
+            if selectedProfileId == nil {
+                selectedProfileId = profileStore.profiles.first?.id
+            }
             if profileStore.isEmpty {
                 presentNewProfileEditor()
             }
         }
         .onChange(of: showProfilesDrawer) { _, isVisible in
-            splitViewVisibility = isVisible ? .all : .detailOnly
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                splitViewVisibility = isVisible ? .all : .detailOnly
+            }
         }
         .onChange(of: splitViewVisibility) { _, visibility in
             showProfilesDrawer = isSidebarVisible(for: visibility)
         }
         .onChange(of: externalFileIntake.sequence) { _, _ in
             ingestExternalFiles()
+        }
+        .onChange(of: profileStore.profiles.map(\.id)) { _, ids in
+            if let selectedProfileId, !ids.contains(selectedProfileId) {
+                self.selectedProfileId = ids.first
+            } else if self.selectedProfileId == nil {
+                self.selectedProfileId = ids.first
+            }
         }
         .onOpenURL { url in
             addFiles([url])
@@ -246,8 +366,8 @@ struct ContentView: View {
                 if profileStore.profiles.contains(where: { $0.id == updated.id }) {
                     profileStore.update(updated)
                 } else {
-                    profileStore.profiles.append(updated)
-                    profileStore.setSelectedProfile(id: updated.id)
+                    profileStore.add(updated)
+                    selectedProfileId = updated.id
                 }
                 do {
                     var storedProfile = updated
@@ -277,7 +397,7 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            List(selection: selectedProfileBinding) {
+            List(selection: $selectedProfileId) {
                 Section {
                     ForEach(profileStore.profiles) { profile in
                         profileSidebarRow(profile)
@@ -302,25 +422,27 @@ struct ContentView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .background(Self.navigatorBackground)
+            .background(drawerBackground)
             .environment(\.defaultMinListRowHeight, 30)
 
             HStack(spacing: 8) {
                 paneHeaderButton(systemImage: "plus", help: "New profile") {
-                    addProfileFromSidebar()
+                    presentNewProfileEditor()
                 }
                 paneHeaderButton(
                     systemImage: "minus",
                     help: "Delete selected profile",
                     isDisabled: !canDeleteProfile
                 ) {
-                    deleteSelectedProfile()
+                    if let selectedProfile {
+                        deleteProfile(selectedProfile)
+                    }
                 }
                 Spacer()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Self.chromeBackground)
+            .background(drawerBackground)
         }
     }
 
@@ -344,7 +466,7 @@ struct ContentView: View {
 
     private var middleWorkbench: some View {
         VStack(spacing: 0) {
-            if profileStore.selectedProfile != nil {
+            if selectedProfile != nil {
                 filesArea
                 middleActionBar
             } else if profileStore.isEmpty {
@@ -384,7 +506,7 @@ struct ContentView: View {
     private var middleTopBar: some View {
         HStack(spacing: 10) {
             Group {
-                if let selectedProfile = profileStore.selectedProfile {
+                if let selectedProfile {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(selectedProfile.name)
                             .font(.headline)
@@ -416,41 +538,54 @@ struct ContentView: View {
     private var middleActionBar: some View {
         HStack(spacing: 8) {
             Spacer()
-            Button("Clear") {
-                clearAllFiles()
-            }
-            .buttonStyle(.borderless)
-            .font(.caption)
-            .controlSize(.small)
-            .disabled(!canClearFiles)
 
-            if jobRunner.isRunning {
-                Button {
+            HStack(spacing: 0) {
+                actionIconButton(
+                    systemImage: "arrow.counterclockwise",
+                    help: "Reset queued files and clear the current job",
+                    isEnabled: canResetAction
+                ) {
+                    clearAllFiles()
+                }
+
+                Divider()
+                    .frame(height: 24)
+                    .padding(.horizontal, 2)
+
+                actionIconButton(
+                    systemImage: "stop.fill",
+                    help: "Stop the current job",
+                    isEnabled: canStopAction
+                ) {
                     jobRunner.cancel()
-                } label: {
-                    Label("Stop", systemImage: "stop.circle")
-                }
-                .help("Stop the current job")
-            } else {
-                if profileStore.selectedProfile != nil, !droppedFileItems.isEmpty {
-                    Button {
-                        startQueuedUpload()
-                    } label: {
-                        Label("Upload", systemImage: "arrow.up.circle.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
-                    .help("Upload selected photos and import to WordPress")
                 }
 
-                if jobRunner.canRetryFailed, let profile = retryProfile {
-                    Button {
-                        jobRunner.retryFailed(profile: profile)
-                    } label: {
-                        Label("Retry Failed", systemImage: "arrow.counterclockwise")
-                    }
-                    .help("Retry failed files")
+                Divider()
+                    .frame(height: 24)
+                    .padding(.horizontal, 2)
+
+                actionIconButton(
+                    systemImage: "play.fill",
+                    help: "Upload selected photos and import to WordPress",
+                    isEnabled: canStartAction
+                ) {
+                    startQueuedUpload()
                 }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.12))
+            )
+
+            if jobRunner.canRetryFailed, let profile = retryProfile {
+                Button {
+                    jobRunner.retryFailed(profile: profile)
+                } label: {
+                    Label("Retry Failed", systemImage: "arrow.counterclockwise")
+                }
+                .help("Retry failed files")
             }
         }
         .padding(.horizontal, 12)
@@ -458,26 +593,36 @@ struct ContentView: View {
         .background(Self.chromeBackground)
     }
 
+    private var operationsDrawerToggleButton: some View {
+        Button {
+            showOperationsDrawer.toggle()
+        } label: {
+            Image(systemName: "sidebar.right")
+        }
+        .help(showOperationsDrawer ? "Hide operations drawer" : "Show operations drawer")
+    }
+
     // MARK: - Operations Drawer
 
     private var operationsDrawer: some View {
         VStack(spacing: 0) {
-            Picker("Active Job", selection: $operationsTab) {
-                ForEach(OperationsTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
+            OperationsTabsControl(
+                selection: $operationsTab,
+                tabs: Array(OperationsTab.allCases)
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Self.chromeBackground)
+            .background(drawerBackground)
 
             Group {
                 switch operationsTab {
                 case .activeJob:
-                    operationsProgressPanel
+                    VStack(spacing: 0) {
+                        operationsProgressPanel
+                        Spacer(minLength: 0)
+                    }
                 case .terminal:
                     logViewer
                 case .history:
@@ -486,7 +631,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Self.inspectorBackground)
+        .background(drawerBackground)
     }
 
     private var operationsProgressPanel: some View {
@@ -512,11 +657,11 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Self.chromeBackground)
+        .background(drawerBackground)
     }
 
     private var selectedProfileJobs: [Job] {
-        guard let selectedId = profileStore.selectedProfileId else {
+        guard let selectedId = selectedProfileId else {
             return jobStore.jobs
         }
         return jobStore.jobs.filter { $0.profileId == selectedId }
@@ -539,7 +684,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Self.chromeBackground)
+            .background(drawerBackground)
 
             List {
                 if selectedProfileJobs.isEmpty {
@@ -573,7 +718,7 @@ struct ContentView: View {
             }
             .listStyle(.inset(alternatesRowBackgrounds: false))
             .scrollContentBackground(.hidden)
-            .background(Self.inspectorBackground)
+            .background(drawerBackground)
         }
     }
 
@@ -582,22 +727,6 @@ struct ContentView: View {
     private var filesArea: some View {
         let files = filesForDisplay()
         return VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Button("Browse…") { choosePhotos() }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .controlSize(.small)
-                Button("Clear") { clearAllFiles() }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .controlSize(.small)
-                    .disabled(!canClearFiles)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Self.chromeBackground)
-
             ZStack {
                 List(selection: $selectedFileRowIDs) {
                     ForEach(files) { file in
@@ -668,6 +797,18 @@ struct ContentView: View {
 
     private var canClearFiles: Bool {
         !jobRunner.isRunning && (!droppedFileItems.isEmpty || jobRunner.currentJob != nil)
+    }
+
+    private var canStartAction: Bool {
+        !jobRunner.isRunning && selectedProfile != nil && !droppedFileItems.isEmpty
+    }
+
+    private var canStopAction: Bool {
+        jobRunner.isRunning
+    }
+
+    private var canResetAction: Bool {
+        canClearFiles
     }
 
     private func filesForDisplay() -> [DisplayFile] {
@@ -862,7 +1003,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Self.chromeBackground)
+            .background(drawerBackground)
 
             let bottomID = "log-bottom"
             ScrollViewReader { proxy in
@@ -902,6 +1043,24 @@ struct ContentView: View {
         }
     }
 
+    private func actionIconButton(
+        systemImage: String,
+        help: String,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 22, weight: .semibold))
+                .frame(width: 46, height: 34)
+                .foregroundStyle(isEnabled ? Color.blue : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
     private func paneHeaderButton(
         systemImage: String,
         help: String,
@@ -927,10 +1086,6 @@ struct ContentView: View {
 
     // MARK: - Helpers
 
-    private func syncSplitVisibilityFromBindings() {
-        splitViewVisibility = showProfilesDrawer ? .all : .detailOnly
-    }
-
     private func isSidebarVisible(for visibility: NavigationSplitViewVisibility) -> Bool {
         switch visibility {
         case .detailOnly:
@@ -942,7 +1097,11 @@ struct ContentView: View {
 
     private func setProfilesDrawerVisible(_ isVisible: Bool) {
         showProfilesDrawer = isVisible
-        splitViewVisibility = isVisible ? .all : .detailOnly
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            splitViewVisibility = isVisible ? .all : .detailOnly
+        }
     }
 
     private var retryProfile: ServerProfile? {
@@ -951,15 +1110,11 @@ struct ContentView: View {
     }
 
     private var canDeleteProfile: Bool {
-        profileStore.selectedProfile != nil && !jobRunner.isRunning
+        selectedProfile != nil && !jobRunner.isRunning
     }
 
     private var canClearJobHistory: Bool {
         !jobRunner.isRunning && !jobStore.jobs.isEmpty
-    }
-
-    private func addProfileFromSidebar() {
-        presentNewProfileEditor()
     }
 
     private func presentNewProfileEditor() {
@@ -971,11 +1126,6 @@ struct ContentView: View {
             initialPassword: nil,
             initialKeyPassphrase: nil
         )
-    }
-
-    private func deleteSelectedProfile() {
-        guard let selected = profileStore.selectedProfile else { return }
-        deleteProfile(selected)
     }
 
     private func deleteProfile(_ profile: ServerProfile) {
@@ -1039,7 +1189,7 @@ struct ContentView: View {
     }
 
     private func startQueuedUpload() {
-        guard let profile = profileStore.selectedProfile else { return }
+        guard let profile = selectedProfile else { return }
         let queued = droppedFileItems.map(\.localURL)
         guard !queued.isEmpty else { return }
 

@@ -52,6 +52,8 @@ private final class OutputCollector: @unchecked Sendable {
     func consume(stream: CommandOutputStream, data: Data) {
         guard !data.isEmpty else { return }
 
+        var linesToEmit: [(CommandOutputStream, String)] = []
+
         lock.lock()
         let chunk = String(decoding: data, as: UTF8.self)
         switch stream {
@@ -60,49 +62,52 @@ private final class OutputCollector: @unchecked Sendable {
             while let range = stdoutBuffer.range(of: "\n") {
                 let line = String(stdoutBuffer[..<range.lowerBound]).trimmingCharacters(in: .newlines)
                 stdoutBuffer = String(stdoutBuffer[range.upperBound...])
-                emitLocked(stream: .stdout, line: line)
+                if !line.isEmpty {
+                    stdoutLines.append(line)
+                    linesToEmit.append((.stdout, line))
+                }
             }
         case .stderr:
             stderrBuffer.append(chunk)
             while let range = stderrBuffer.range(of: "\n") {
                 let line = String(stderrBuffer[..<range.lowerBound]).trimmingCharacters(in: .newlines)
                 stderrBuffer = String(stderrBuffer[range.upperBound...])
-                emitLocked(stream: .stderr, line: line)
+                if !line.isEmpty {
+                    stderrLines.append(line)
+                    linesToEmit.append((.stderr, line))
+                }
             }
         }
         lock.unlock()
-    }
 
-    /// Must be called while `lock` is held.
-    private func emitLocked(stream: CommandOutputStream, line: String) {
-        guard !line.isEmpty else { return }
-
-        switch stream {
-        case .stdout:
-            stdoutLines.append(line)
-        case .stderr:
-            stderrLines.append(line)
+        for (stream, line) in linesToEmit {
+            onLine?(stream, line)
         }
-
-        onLine?(stream, line)
     }
 
     func finalize() -> (stdout: [String], stderr: [String]) {
+        var linesToEmit: [(CommandOutputStream, String)] = []
         lock.lock()
         let stdoutTail = stdoutBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         if !stdoutTail.isEmpty {
-            emitLocked(stream: .stdout, line: stdoutTail)
+            stdoutLines.append(stdoutTail)
+            linesToEmit.append((.stdout, stdoutTail))
             stdoutBuffer = ""
         }
 
         let stderrTail = stderrBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         if !stderrTail.isEmpty {
-            emitLocked(stream: .stderr, line: stderrTail)
+            stderrLines.append(stderrTail)
+            linesToEmit.append((.stderr, stderrTail))
             stderrBuffer = ""
         }
 
         let result = (stdoutLines, stderrLines)
         lock.unlock()
+
+        for (stream, line) in linesToEmit {
+            onLine?(stream, line)
+        }
         return result
     }
 }

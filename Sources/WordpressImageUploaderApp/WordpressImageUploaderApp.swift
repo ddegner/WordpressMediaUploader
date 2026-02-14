@@ -37,12 +37,12 @@ struct WordpressMediaUploaderApp: App {
 
     @State private var profileStore: ProfileStore
     @State private var jobStore: JobStore
-    @State private var jobRunner: JobRunner
     @State private var externalFileIntake: ExternalFileIntake
-    @State private var showProfilesDrawer = true
-    @State private var showOperationsDrawer = true
     @State private var showAbout = false
     @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.auto.rawValue
+    @AppStorage(JobRunner.playCompletionSoundDefaultsKey) private var playCompletionSoundOnCompletion = false
+    @FocusedBinding(\.showProfilesDrawerBinding) private var focusedShowProfilesDrawer: Bool?
+    @FocusedBinding(\.showOperationsDrawerBinding) private var focusedShowOperationsDrawer: Bool?
     @NSApplicationDelegateAdaptor(DockFileOpenDelegate.self) private var dockFileOpenDelegate
 
     init() {
@@ -52,7 +52,6 @@ struct WordpressMediaUploaderApp: App {
 
         _profileStore = State(initialValue: profiles)
         _jobStore = State(initialValue: jobs)
-        _jobRunner = State(initialValue: JobRunner(profileStore: profiles, jobStore: jobs))
         _externalFileIntake = State(initialValue: fileIntake)
     }
 
@@ -67,51 +66,49 @@ struct WordpressMediaUploaderApp: App {
             ?? "Wordpress Media Uploader"
     }
 
+    private var focusedShowProfilesDrawerToggleBinding: Binding<Bool> {
+        Binding(
+            get: { focusedShowProfilesDrawer ?? true },
+            set: { focusedShowProfilesDrawer = $0 }
+        )
+    }
+
+    private var focusedShowOperationsDrawerToggleBinding: Binding<Bool> {
+        Binding(
+            get: { focusedShowOperationsDrawer ?? true },
+            set: { focusedShowOperationsDrawer = $0 }
+        )
+    }
+
     private func applyAppearance() {
         NSApp.appearance = appearanceMode.nsAppearance
     }
 
-    private func applyWindowChrome() {
-        for window in NSApp.windows {
-            window.styleMask.insert(.fullSizeContentView)
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-        }
-    }
-
-    private var minimumWindowWidth: CGFloat {
-        let workbenchMinWidth: CGFloat = 420
-        let profilesDrawerMinWidth: CGFloat = showProfilesDrawer ? 260 : 0
-        let operationsDrawerMinWidth: CGFloat = showOperationsDrawer ? 320 : 0
-        return workbenchMinWidth + profilesDrawerMinWidth + operationsDrawerMinWidth
-    }
-
     var body: some Scene {
         WindowGroup("") {
-            ContentView(
+            AppWindowRootView(
                 profileStore: profileStore,
                 jobStore: jobStore,
-                jobRunner: jobRunner,
-                externalFileIntake: externalFileIntake,
-                showProfilesDrawer: $showProfilesDrawer,
-                showOperationsDrawer: $showOperationsDrawer
+                externalFileIntake: externalFileIntake
             )
-            .frame(minWidth: minimumWindowWidth, minHeight: 600)
             .preferredColorScheme(appearanceMode.preferredColorScheme)
             .onAppear {
                 applyAppearance()
-                DispatchQueue.main.async {
-                    applyWindowChrome()
-                }
             }
             .onChange(of: appearanceModeRaw) { _, _ in
                 applyAppearance()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                jobStore.removeActiveJobs()
             }
             .sheet(isPresented: $showAbout) {
                 AboutView()
             }
         }
+        .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1180, height: 760)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About \(appDisplayName)") {
@@ -121,10 +118,13 @@ struct WordpressMediaUploaderApp: App {
 
             CommandGroup(after: .toolbar) {
                 Divider()
-                Toggle("Show Profiles Drawer", isOn: $showProfilesDrawer)
+                Toggle("Show Profiles Drawer", isOn: focusedShowProfilesDrawerToggleBinding)
+                    .disabled(focusedShowProfilesDrawer == nil)
                     .keyboardShortcut("p", modifiers: [.command, .shift])
-                Toggle("Show Operations Drawer", isOn: $showOperationsDrawer)
+                Toggle("Show Operations Drawer", isOn: focusedShowOperationsDrawerToggleBinding)
+                    .disabled(focusedShowOperationsDrawer == nil)
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Toggle("Play Sound on Completion", isOn: $playCompletionSoundOnCompletion)
 
                 Divider()
                 Picker("Appearance", selection: $appearanceModeRaw) {
@@ -134,6 +134,29 @@ struct WordpressMediaUploaderApp: App {
                 }
             }
         }
+    }
+}
+
+private struct AppWindowRootView: View {
+    @Bindable var profileStore: ProfileStore
+    @Bindable var jobStore: JobStore
+    @Bindable var externalFileIntake: ExternalFileIntake
+    @State private var jobRunner: JobRunner
+
+    init(profileStore: ProfileStore, jobStore: JobStore, externalFileIntake: ExternalFileIntake) {
+        self.profileStore = profileStore
+        self.jobStore = jobStore
+        self.externalFileIntake = externalFileIntake
+        _jobRunner = State(initialValue: JobRunner(profileStore: profileStore, jobStore: jobStore))
+    }
+
+    var body: some View {
+        ContentView(
+            profileStore: profileStore,
+            jobStore: jobStore,
+            jobRunner: jobRunner,
+            externalFileIntake: externalFileIntake
+        )
     }
 }
 
@@ -156,6 +179,8 @@ private struct AboutView: View {
             ?? "—"
     }
 
+    private static let repoURL = URL(string: "https://github.com/ddegner/WordpressMediaUploader")!
+
     var body: some View {
         VStack(spacing: 16) {
             Image(nsImage: NSApp.applicationIconImage)
@@ -172,7 +197,7 @@ private struct AboutView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Link("GitHub Repository", destination: URL(string: "https://github.com/ddegner/WordpressMediaUploader")!)
+            Link("GitHub Repository", destination: Self.repoURL)
                 .font(.callout)
 
             HStack {

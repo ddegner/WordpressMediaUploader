@@ -1,0 +1,17 @@
+included:
+  - Sources
+  - Tests
+  - Package.swift
+
+excluded:
+  - .build
+  - .swiftpm
+  - output
+
+type_body_length:
+  warning: 700
+  error: 1500
+
+file_length:
+  warning: 1200
+  error: 2000

@@ -4,6 +4,14 @@ import Observation
 @MainActor
 @Observable
 final class JobStore {
+    private static let inFlightSteps: Set<JobStep> = [
+        .preflight,
+        .uploading,
+        .verifying,
+        .importing,
+        .regenerating
+    ]
+
     var jobs: [Job] = []
 
     init() {
@@ -32,6 +40,14 @@ final class JobStore {
 
     func job(id: UUID) -> Job? {
         jobs.first { $0.id == id }
+    }
+
+    func removeActiveJobs() {
+        let before = jobs.count
+        jobs.removeAll { Self.inFlightSteps.contains($0.step) }
+        if jobs.count != before {
+            save()
+        }
     }
 
     private func save() {

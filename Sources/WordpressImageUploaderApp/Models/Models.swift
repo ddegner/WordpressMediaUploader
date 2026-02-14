@@ -120,10 +120,6 @@ struct Job: Identifiable, Codable, Sendable {
     var failedCount: Int {
         localFiles.filter { $0.status == .failed }.count
     }
-
-    var completedCount: Int {
-        localFiles.filter { $0.status == .regenerated }.count
-    }
 }
 
 extension FileItem {

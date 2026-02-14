@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -24,6 +25,8 @@ enum JobRunnerError: LocalizedError {
 @MainActor
 @Observable
 final class JobRunner {
+    static let playCompletionSoundDefaultsKey = "playCompletionSoundOnCompletion"
+
     private actor ConnectionTestTimeoutState {
         private(set) var triggered = false
 
@@ -52,10 +55,8 @@ final class JobRunner {
         self.jobStore = jobStore
         self.transport = SSHTransport(profileStore: profileStore)
         recoverInterruptedJobs()
-        self.currentJob = jobStore.jobs.first
-        if let job = jobStore.jobs.first {
-            self.logLines = readLogLines(atPath: job.logsPath)
-        }
+        self.currentJob = nil
+        self.logLines = []
     }
 
     var canRetryFailed: Bool {
@@ -112,8 +113,24 @@ final class JobRunner {
 
             job.step = .preflight
             job.errorMessage = nil
-            job.uploadProgress = 0
-            job.importProgress = 0
+            // job.uploadProgress = 0
+            // job.importProgress = 0
+            // Calculate progress based on existing files that don't need work
+            let total = Double(job.localFiles.count)
+            if total > 0 {
+                let uploadedCount = job.localFiles.filter {
+                    [.uploaded, .verified, .imported, .regenerated].contains($0.status)
+                }.count
+                job.uploadProgress = Double(uploadedCount) / total
+
+                let importedCount = job.localFiles.filter {
+                    [.imported, .regenerated].contains($0.status)
+                }.count
+                job.importProgress = Double(importedCount) / total
+            } else {
+                job.uploadProgress = 0
+                job.importProgress = 0
+            }
             job.activeFileId = nil
         }
 
@@ -317,6 +334,7 @@ final class JobRunner {
                         mutable.activeFileId = nil
                     }
                     self.errorBanner = error.localizedDescription
+                    self.playCompletionSoundIfEnabled(success: false)
                 }
             }
         }
@@ -333,6 +351,7 @@ final class JobRunner {
                 mutable.activeFileId = nil
             }
             errorBanner = jobSnapshot(id: jobID)?.errorMessage
+            playCompletionSoundIfEnabled(success: false)
         } else {
             mutateJob(id: jobID) { mutable in
                 mutable.step = .finished
@@ -341,6 +360,7 @@ final class JobRunner {
                 mutable.importProgress = 1
                 mutable.activeFileId = nil
             }
+            playCompletionSoundIfEnabled(success: true)
         }
     }
 
@@ -656,7 +676,7 @@ final class JobRunner {
         }
 
         let targets = job.localFiles.filter {
-            $0.importAttachmentId != nil && $0.status != .regenerated
+            $0.importAttachmentId != nil && $0.status == .imported
         }
 
         if targets.isEmpty {
@@ -732,12 +752,7 @@ final class JobRunner {
             throw JobRunnerError.unsupportedImages
         }
 
-        var items: [FileItem] = []
-        for url in supported {
-            if let item = FileItem.fromURL(url) {
-                items.append(item)
-            }
-        }
+        let items = supported.compactMap(FileItem.fromURL)
 
         guard !items.isEmpty else {
             throw JobRunnerError.unsupportedImages
@@ -850,6 +865,15 @@ final class JobRunner {
         return fallback
     }
 
+    private func playCompletionSoundIfEnabled(success: Bool) {
+        guard UserDefaults.standard.bool(forKey: Self.playCompletionSoundDefaultsKey) else { return }
+
+        let soundName: NSSound.Name = success ? .init("Glass") : .init("Basso")
+        if NSSound(named: soundName)?.play() != true {
+            NSSound.beep()
+        }
+    }
+
     private func recoverInterruptedJobs() {
         let inFlightSteps: Set<JobStep> = [.preflight, .uploading, .verifying, .importing, .regenerating]
 
@@ -870,11 +894,12 @@ final class JobRunner {
                 }
             }
 
-            if hasRetryableFailure {
-                recovered.step = .failed
-                recovered.errorMessage = "Previous run was interrupted. Use Retry Failed."
-                jobStore.upsert(recovered)
-            }
+            // Always fail an in-flight job even if no specific files were failed (e.g. all files done but job step not updated)
+            recovered.step = .failed
+            recovered.errorMessage = hasRetryableFailure
+                ? "Previous run was interrupted. Use Retry Failed."
+                : "Previous run was interrupted before final status update."
+            jobStore.upsert(recovered)
         }
     }
 

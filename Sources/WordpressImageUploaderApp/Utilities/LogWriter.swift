@@ -31,12 +31,13 @@ final class LogWriter: @unchecked Sendable {
     }
 
     func append(_ line: String) {
-        let timestamp = dateFormatter.string(from: Date())
-        let payload = "[\(timestamp)] \(line)\n"
-        guard let data = payload.data(using: .utf8) else { return }
-
         queue.async { [weak self] in
-            guard let handle = self?.handle else { return }
+            guard let self else { return }
+            let timestamp = self.dateFormatter.string(from: Date())
+            let payload = "[\(timestamp)] \(line)\n"
+            guard let data = payload.data(using: .utf8) else { return }
+
+            guard let handle = self.handle else { return }
             do {
                 try handle.write(contentsOf: data)
             } catch {

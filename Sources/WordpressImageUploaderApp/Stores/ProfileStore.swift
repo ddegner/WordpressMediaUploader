@@ -3,35 +3,33 @@ import Observation
 
 private struct ProfilesDiskState: Codable {
     var profiles: [ServerProfile]
-    var selectedProfileId: UUID?
 }
 
 @MainActor
 @Observable
 final class ProfileStore {
     var profiles: [ServerProfile] = []
-    var selectedProfileId: UUID?
 
     init() {
         load()
-        if !profiles.isEmpty, selectedProfileId == nil {
-            selectedProfileId = profiles.first?.id
-            save()
-        }
     }
 
     var isEmpty: Bool {
         profiles.isEmpty
     }
 
-    var selectedProfile: ServerProfile? {
-        guard let selectedProfileId else { return nil }
-        return profiles.first { $0.id == selectedProfileId }
-    }
-
     func update(_ profile: ServerProfile) {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         profiles[idx] = profile
+        save()
+    }
+
+    func add(_ profile: ServerProfile) {
+        guard !profiles.contains(where: { $0.id == profile.id }) else {
+            update(profile)
+            return
+        }
+        profiles.append(profile)
         save()
     }
 
@@ -46,14 +44,6 @@ final class ProfileStore {
         }
 
         profiles.removeAll { $0.id == id }
-        if selectedProfileId == id {
-            selectedProfileId = profiles.first?.id
-        }
-        save()
-    }
-
-    func setSelectedProfile(id: UUID?) {
-        selectedProfileId = id
         save()
     }
 
@@ -108,7 +98,7 @@ final class ProfileStore {
     }
 
     private func save() {
-        let state = ProfilesDiskState(profiles: profiles, selectedProfileId: selectedProfileId)
+        let state = ProfilesDiskState(profiles: profiles)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
@@ -125,10 +115,8 @@ final class ProfileStore {
             let data = try Data(contentsOf: AppPaths.profilesFile)
             let decoded = try JSONDecoder().decode(ProfilesDiskState.self, from: data)
             profiles = decoded.profiles
-            selectedProfileId = decoded.selectedProfileId
         } catch {
             profiles = []
-            selectedProfileId = nil
         }
     }
 }

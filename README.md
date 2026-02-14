@@ -1,17 +1,30 @@
 # Wordpress Media Uploader
 
+[Download macOS binary (v0.7)](https://github.com/ddegner/WordpressMediaUploader/raw/main/WordpressMediaUploader-v0.7-macOS.zip)
+
 A native macOS app built in SwiftUI for batch-uploading images to a remote WordPress server.
 
 Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to handle large media libraries efficiently.
 
-**Version 0.6** · macOS 14+
+**Version 0.7** · macOS 14+
 
-![Wordpress Media Uploader screenshot](screenshots/app-screenshot.png)
+## Screenshots
+
+Quick visual tour of the app workflow:
+
+- **Overview** — three-pane workspace with profiles, drop zone, and operations drawer.
+![Overview](screenshots/01-overview.png)
+
+- **Queue + job status** — queued files, per-file state, and active job progress in one view.
+![Queued files](screenshots/02-queued-files.png)
+
+- **Profile setup** — complete connection and WordPress settings in the built-in profile editor.
+![Profile editor](screenshots/03-profile-editor.png)
 
 ## Features
 
 - **Single-window profile setup** — connection, WordPress path, import defaults
-- **Multiple server profiles** with persistent selection
+- **Multiple server profiles**
 - **Credentials stored in Keychain** — password auth and optional key passphrase
 - **SSH auth modes** — key-based (agent-friendly) or password via `SSH_ASKPASS`
 - **Drag-and-drop & file picker** — JPG, PNG, WebP, TIFF, AVIF
