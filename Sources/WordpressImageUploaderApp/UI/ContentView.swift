@@ -585,7 +585,7 @@ struct ContentView: View {
                 } label: {
                     Label("Retry Failed", systemImage: "arrow.counterclockwise")
                 }
-                .help("Retry failed files")
+                .help("Retry only previously failed files; successful files are skipped")
             }
         }
         .padding(.horizontal, 12)
