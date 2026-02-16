@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct WordpressMediaUploaderApp: App {
-    private static let repositoryURL = URL(string: "https://github.com/ddegner/WordpressMediaUploader")!
+    private static let repositoryURL = URL(string: "https://github.com/ddegner/WPMediaUploader")!
 
     private enum AppearanceMode: String, CaseIterable, Identifiable {
         case auto
