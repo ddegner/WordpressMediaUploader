@@ -18,7 +18,7 @@ func ensureNoTrailingSlash(_ value: String) -> String {
 }
 
 func isSupportedImageExtension(_ url: URL) -> Bool {
-    let allowed = Set(["jpg", "jpeg", "png", "webp", "tif", "tiff", "avif"])
+    let allowed = Set(["jpg", "jpeg", "jpe", "gif", "png", "bmp", "ico", "webp", "avif", "heic", "pdf"])
     return allowed.contains(url.pathExtension.lowercased())
 }
 

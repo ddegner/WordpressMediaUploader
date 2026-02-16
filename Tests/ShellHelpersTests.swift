@@ -21,6 +21,13 @@ final class ShellHelpersTests: XCTestCase {
     func testIsSupportedImageExtension() {
         XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.JPG")))
         XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.avif")))
+        XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.jpe")))
+        XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.gif")))
+        XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.bmp")))
+        XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.ico")))
+        XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.heic")))
+        XCTAssertTrue(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/doc.pdf")))
+        XCTAssertFalse(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/photo.tiff")))
         XCTAssertFalse(isSupportedImageExtension(URL(fileURLWithPath: "/tmp/archive.zip")))
     }
 }

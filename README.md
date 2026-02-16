@@ -27,7 +27,7 @@ Quick visual tour of the app workflow:
 - **Multiple server profiles**
 - **Credentials stored in Keychain** — password auth and optional key passphrase
 - **SSH auth modes** — key-based (agent-friendly) or password via `SSH_ASKPASS`
-- **Drag-and-drop & file picker** — JPG, PNG, WebP, TIFF, AVIF
+- **Drag-and-drop & file picker** — JPG, JPEG, JPE, GIF, PNG, BMP, ICO, WebP, AVIF, HEIC, PDF
 - **Reliable job pipeline** — preflight → upload (`rsync`) → verify → import (`wp media import`) → regenerate thumbnails → cleanup
 - **Retry failed files** without reprocessing successful ones
 - **Streaming logs** in-app + persisted log files

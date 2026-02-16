@@ -106,6 +106,7 @@ struct ContentView: View {
     private static let profilesDrawerWidth: CGFloat = 260
     private static let operationsDrawerWidth: CGFloat = 320
     private static let workbenchMinWidth: CGFloat = 180
+    private static let drawerTransitionDuration: TimeInterval = 0.24
 
     private static let sectionHeaderFont: Font = .caption2.weight(.semibold)
     private static let editorBackground = Color(nsColor: .textBackgroundColor)
@@ -259,8 +260,42 @@ struct ContentView: View {
         return profileStore.profiles.first { $0.id == selectedProfileId }
     }
 
+    private var drawerTransitionTime: TimeInterval {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : Self.drawerTransitionDuration
+    }
+
+    private var drawerTransitionAnimation: Animation {
+        .easeInOut(duration: drawerTransitionTime)
+    }
+
+    private var profilesDrawerSceneBinding: Binding<Bool> {
+        Binding(
+            get: { showProfilesDrawer },
+            set: { setProfilesDrawerVisible($0) }
+        )
+    }
+
+    private var operationsDrawerSceneBinding: Binding<Bool> {
+        Binding(
+            get: { showOperationsDrawer },
+            set: { setOperationsDrawerVisible($0) }
+        )
+    }
+
+    private var operationsDrawerPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { showOperationsDrawer },
+            set: { setOperationsDrawerVisible($0) }
+        )
+    }
+
+    private var visibleDrawerWidth: CGFloat {
+        (showProfilesDrawer ? Self.profilesDrawerWidth : 0)
+        + (showOperationsDrawer ? Self.operationsDrawerWidth : 0)
+    }
+
     private var minimumWindowWidth: CGFloat {
-        Self.profilesDrawerWidth + Self.workbenchMinWidth + Self.operationsDrawerWidth
+        visibleDrawerWidth + Self.workbenchMinWidth
     }
 
     private var drawerBackground: Color {
@@ -291,18 +326,13 @@ struct ContentView: View {
             middleWorkbench
                 .frame(minWidth: Self.workbenchMinWidth, maxWidth: .infinity)
                 .background(Self.editorBackground)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    middleTopBar
-                }
                 .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        operationsDrawerToggleButton
-                    }
+                    middleToolbarItems()
                 }
         }
         .toolbarRole(.editor)
         .navigationSplitViewStyle(.balanced)
-        .inspector(isPresented: $showOperationsDrawer) {
+        .inspector(isPresented: operationsDrawerPresentationBinding) {
             operationsDrawer
                 .background(drawerBackground)
         }
@@ -313,8 +343,9 @@ struct ContentView: View {
         )
         .frame(minWidth: minimumWindowWidth, minHeight: 600)
         .background(Self.editorBackground)
-        .focusedSceneValue(\.showProfilesDrawerBinding, $showProfilesDrawer)
-        .focusedSceneValue(\.showOperationsDrawerBinding, $showOperationsDrawer)
+        .focusedSceneValue(\.showProfilesDrawerBinding, profilesDrawerSceneBinding)
+        .focusedSceneValue(\.showOperationsDrawerBinding, operationsDrawerSceneBinding)
+        .focusedSceneValue(\.windowCommandActions, windowCommandActions)
         .onAppear {
             splitViewVisibility = showProfilesDrawer ? .all : .detailOnly
             ingestExternalFiles()
@@ -325,15 +356,8 @@ struct ContentView: View {
                 presentNewProfileEditor()
             }
         }
-        .onChange(of: showProfilesDrawer) { _, isVisible in
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                splitViewVisibility = isVisible ? .all : .detailOnly
-            }
-        }
         .onChange(of: splitViewVisibility) { _, visibility in
-            showProfilesDrawer = isSidebarVisible(for: visibility)
+            setProfilesDrawerVisible(isSidebarVisible(for: visibility), syncSplitVisibility: false)
         }
         .onChange(of: externalFileIntake.sequence) { _, _ in
             ingestExternalFiles()
@@ -468,7 +492,6 @@ struct ContentView: View {
         VStack(spacing: 0) {
             if selectedProfile != nil {
                 filesArea
-                middleActionBar
             } else if profileStore.isEmpty {
                 ContentUnavailableView {
                     Label("No Profiles", systemImage: "server.rack")
@@ -503,103 +526,95 @@ struct ContentView: View {
         .background(Self.editorBackground)
     }
 
-    private var middleTopBar: some View {
-        HStack(spacing: 10) {
-            Group {
-                if let selectedProfile {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(selectedProfile.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                        Text("\(selectedProfile.username)@\(selectedProfile.host)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    .help("\(selectedProfile.username)@\(selectedProfile.host)")
-                } else if profileStore.isEmpty {
-                    Text("No Profiles")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("No Profile Selected")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
+    @ToolbarContentBuilder
+    private func middleToolbarItems() -> some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            toolbarProfileLabel
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Self.editorBackground)
+
+        ToolbarItemGroup(placement: .automatic) {
+            Button {
+                clearAllFiles()
+            } label: {
+                Label("Reset", systemImage: "trash")
+            }
+            .labelStyle(.iconOnly)
+            .disabled(!canResetAction)
+            .help("Reset queued files and clear the current job")
+            .accessibilityLabel("Reset queued files and clear the current job")
+
+            Button {
+                guard let profile = retryProfile else { return }
+                jobRunner.retryFailed(profile: profile)
+            } label: {
+                Label("Retry Failed", systemImage: "arrow.counterclockwise")
+            }
+            .labelStyle(.iconOnly)
+            .disabled(!(jobRunner.canRetryFailed && retryProfile != nil))
+            .help("Retry only previously failed files; successful files are skipped")
+            .accessibilityLabel("Retry only previously failed files; successful files are skipped")
+
+            Button {
+                jobRunner.cancel()
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+            }
+            .labelStyle(.iconOnly)
+            .disabled(!canStopAction)
+            .help("Stop all active transfers in this window")
+            .accessibilityLabel("Stop all active transfers in this window")
+
+            Button {
+                startQueuedUpload()
+            } label: {
+                Label("Start Upload", systemImage: "play.fill")
+            }
+            .labelStyle(.iconOnly)
+            .disabled(!canStartAction)
+            .help("Upload selected photos and import to WordPress")
+            .accessibilityLabel("Upload selected photos and import to WordPress")
+            .keyboardShortcut(.defaultAction)
+        }
+
+        // Inspector Toggle (Far Right)
+        ToolbarItemGroup(placement: .primaryAction) {
+            Spacer()
+            
+            Button {
+                setOperationsDrawerVisible(!showOperationsDrawer)
+            } label: {
+                Label("Toggle Inspector", systemImage: "sidebar.right")
+            }
+            .help(showOperationsDrawer ? "Hide operations drawer" : "Show operations drawer")
+        }
     }
 
-    private var middleActionBar: some View {
-        HStack(spacing: 8) {
-            Spacer()
-
-            HStack(spacing: 0) {
-                actionIconButton(
-                    systemImage: "arrow.counterclockwise",
-                    help: "Reset queued files and clear the current job",
-                    isEnabled: canResetAction
-                ) {
-                    clearAllFiles()
+    private var toolbarProfileLabel: some View {
+        Group {
+            if let selectedProfile {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(selectedProfile.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("\(selectedProfile.username)@\(selectedProfile.host)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-
-                Divider()
-                    .frame(height: 24)
-                    .padding(.horizontal, 2)
-
-                actionIconButton(
-                    systemImage: "stop.fill",
-                    help: "Stop the current job",
-                    isEnabled: canStopAction
-                ) {
-                    jobRunner.cancel()
-                }
-
-                Divider()
-                    .frame(height: 24)
-                    .padding(.horizontal, 2)
-
-                actionIconButton(
-                    systemImage: "play.fill",
-                    help: "Upload selected photos and import to WordPress",
-                    isEnabled: canStartAction
-                ) {
-                    startQueuedUpload()
-                }
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.12))
-            )
-
-            if jobRunner.canRetryFailed, let profile = retryProfile {
-                Button {
-                    jobRunner.retryFailed(profile: profile)
-                } label: {
-                    Label("Retry Failed", systemImage: "arrow.counterclockwise")
-                }
-                .help("Retry only previously failed files; successful files are skipped")
+                .help("\(selectedProfile.username)@\(selectedProfile.host)")
+            } else if profileStore.isEmpty {
+                Text("No Profiles")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No Profile Selected")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Self.chromeBackground)
-    }
-
-    private var operationsDrawerToggleButton: some View {
-        Button {
-            showOperationsDrawer.toggle()
-        } label: {
-            Image(systemName: "sidebar.right")
-        }
-        .help(showOperationsDrawer ? "Hide operations drawer" : "Show operations drawer")
+        .padding(.vertical, 2)
+        .frame(maxWidth: 340, alignment: .leading)
     }
 
     // MARK: - Operations Drawer
@@ -772,7 +787,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                         Text("Drop photos here")
                             .font(.headline)
-                        Text("JPG, PNG, WebP, TIFF, AVIF")
+                        Text("JPG, JPEG, JPE, GIF, PNG, BMP, ICO, WebP, AVIF, HEIC, PDF")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button("Browse…") { choosePhotos() }
@@ -809,6 +824,73 @@ struct ContentView: View {
 
     private var canResetAction: Bool {
         canClearFiles
+    }
+
+    private var canDeleteSelectedFilesAction: Bool {
+        guard !jobRunner.isRunning, !selectedFileRowIDs.isEmpty else { return false }
+        return filesForDisplay().contains { selectedFileRowIDs.contains($0.id) && $0.source == .queued }
+    }
+
+    private var canUseCurrentJobAction: Bool {
+        jobRunner.currentJob != nil
+    }
+
+    private var windowCommandActions: WindowCommandActions {
+        WindowCommandActions(
+            createProfile: presentNewProfileEditor,
+            editSelectedProfile: {
+                guard let selectedProfile else { return }
+                presentProfileEditor(for: selectedProfile)
+            },
+            deleteSelectedProfile: {
+                guard let selectedProfile else { return }
+                deleteProfile(selectedProfile)
+            },
+            addFiles: choosePhotos,
+            deleteSelectedFiles: deleteSelectedFileRows,
+            resetQueueAndCurrentJob: clearAllFiles,
+            retryFailedFiles: {
+                guard let profile = retryProfile else { return }
+                jobRunner.retryFailed(profile: profile)
+            },
+            stopUpload: {
+                jobRunner.cancel()
+            },
+            startUpload: startQueuedUpload,
+            clearJobHistory: clearJobHistory,
+            openLog: openLogs,
+            copyReport: copyReport,
+            exportJSONReport: {
+                exportReport(as: .json)
+            },
+            exportCSVReport: {
+                exportReport(as: .csv)
+            },
+            showActiveJobTab: {
+                setOperationsDrawerVisible(true)
+                operationsTab = .activeJob
+            },
+            showTerminalTab: {
+                setOperationsDrawerVisible(true)
+                operationsTab = .terminal
+            },
+            showJobHistoryTab: {
+                setOperationsDrawerVisible(true)
+                operationsTab = .history
+            },
+            canEditSelectedProfile: selectedProfile != nil,
+            canDeleteSelectedProfile: canDeleteProfile,
+            canDeleteSelectedFiles: canDeleteSelectedFilesAction,
+            canResetQueueAndCurrentJob: canResetAction,
+            canRetryFailedFiles: jobRunner.canRetryFailed && retryProfile != nil,
+            canStopUpload: canStopAction,
+            canStartUpload: canStartAction,
+            canClearJobHistory: canClearJobHistory,
+            canOpenLog: canUseCurrentJobAction,
+            canCopyReport: canUseCurrentJobAction,
+            canExportJSONReport: canUseCurrentJobAction,
+            canExportCSVReport: canUseCurrentJobAction
+        )
     }
 
     private func filesForDisplay() -> [DisplayFile] {
@@ -1043,24 +1125,6 @@ struct ContentView: View {
         }
     }
 
-    private func actionIconButton(
-        systemImage: String,
-        help: String,
-        isEnabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 22, weight: .semibold))
-                .frame(width: 46, height: 34)
-                .foregroundStyle(isEnabled ? Color.blue : Color.secondary)
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .help(help)
-        .accessibilityLabel(help)
-    }
-
     private func paneHeaderButton(
         systemImage: String,
         help: String,
@@ -1095,12 +1159,29 @@ struct ContentView: View {
         }
     }
 
-    private func setProfilesDrawerVisible(_ isVisible: Bool) {
-        showProfilesDrawer = isVisible
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            splitViewVisibility = isVisible ? .all : .detailOnly
+    private func splitVisibility(forProfilesDrawer isVisible: Bool) -> NavigationSplitViewVisibility {
+        isVisible ? .all : .detailOnly
+    }
+
+    private func setProfilesDrawerVisible(_ isVisible: Bool, syncSplitVisibility: Bool = true) {
+        let shouldToggleDrawer = showProfilesDrawer != isVisible
+        let targetSplitVisibility = splitVisibility(forProfilesDrawer: isVisible)
+        let shouldSyncSplitVisibility = syncSplitVisibility && splitViewVisibility != targetSplitVisibility
+        guard shouldToggleDrawer || shouldSyncSplitVisibility else { return }
+
+        withAnimation(drawerTransitionAnimation) {
+            showProfilesDrawer = isVisible
+            if shouldSyncSplitVisibility {
+                splitViewVisibility = targetSplitVisibility
+            }
+        }
+    }
+
+    private func setOperationsDrawerVisible(_ isVisible: Bool) {
+        guard showOperationsDrawer != isVisible else { return }
+
+        withAnimation(drawerTransitionAnimation) {
+            showOperationsDrawer = isVisible
         }
     }
 
@@ -1145,15 +1226,21 @@ struct ContentView: View {
         )
     }
 
+    @MainActor
     private func choosePhotos() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = {
-            var types: [UTType] = [.jpeg, .png, .webP, .tiff]
-            if let avif = UTType(filenameExtension: "avif") {
-                types.append(avif)
+            let extensions = ["jpg", "jpeg", "jpe", "gif", "png", "bmp", "ico", "webp", "avif", "heic", "pdf"]
+            var seen = Set<String>()
+            var types: [UTType] = []
+            for ext in extensions {
+                guard let type = UTType(filenameExtension: ext) else { continue }
+                if seen.insert(type.identifier).inserted {
+                    types.append(type)
+                }
             }
             return types
         }()
@@ -1197,7 +1284,7 @@ struct ContentView: View {
         if jobRunner.isRunning {
             droppedFileItems.removeAll()
             selectedFileRowIDs.removeAll()
-            showOperationsDrawer = true
+            setOperationsDrawerVisible(true)
             operationsTab = .activeJob
         }
     }
@@ -1248,6 +1335,7 @@ struct ContentView: View {
         pasteboard.setString(text, forType: .string)
     }
 
+    @MainActor
     private func exportReport(as format: ReportExportFormat) {
         guard let payload = jobRunner.reportPayload(format: format) else { return }
 
@@ -1259,7 +1347,7 @@ struct ContentView: View {
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
         do {
-            try payload.write(to: destination, atomically: true, encoding: .utf8)
+            try payload.write(to: destination, atomically: true, encoding: String.Encoding.utf8)
         } catch {
             jobRunner.errorBanner = "Failed to export: \(error.localizedDescription)"
         }

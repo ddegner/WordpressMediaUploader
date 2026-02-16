@@ -26,6 +26,8 @@ final class ExternalFileIntake {
 }
 
 final class DockFileOpenDelegate: NSObject, NSApplicationDelegate {
+    private var mainWindowObserver: NSObjectProtocol?
+
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
             ExternalFileIntake.shared.enqueue(urls)
@@ -45,5 +47,27 @@ final class DockFileOpenDelegate: NSObject, NSApplicationDelegate {
             ExternalFileIntake.shared.enqueue(urls)
         }
         sender.reply(toOpenOrPrint: .success)
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        NSApplication.shared.windows.forEach { $0.tabbingMode = .disallowed }
+
+        mainWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeMainNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let window = notification.object as? NSWindow else { return }
+            Task { @MainActor in
+                window.tabbingMode = .disallowed
+            }
+        }
+    }
+
+    deinit {
+        if let mainWindowObserver {
+            NotificationCenter.default.removeObserver(mainWindowObserver)
+        }
     }
 }

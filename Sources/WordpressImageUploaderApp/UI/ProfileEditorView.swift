@@ -128,6 +128,7 @@ struct ProfileEditorView: View {
                 .font(.body.monospaced())
 
             Toggle("Keep remote files after success", isOn: $profile.keepRemoteFiles)
+            Toggle("Play notification sound on completion", isOn: $profile.playCompletionSoundOnCompletion)
         }
     }
 

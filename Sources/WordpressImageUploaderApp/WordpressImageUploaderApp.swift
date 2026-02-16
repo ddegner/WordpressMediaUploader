@@ -3,6 +3,8 @@ import SwiftUI
 
 @main
 struct WordpressMediaUploaderApp: App {
+    private static let repositoryURL = URL(string: "https://github.com/ddegner/WordpressMediaUploader")!
+
     private enum AppearanceMode: String, CaseIterable, Identifiable {
         case auto
         case light
@@ -38,11 +40,11 @@ struct WordpressMediaUploaderApp: App {
     @State private var profileStore: ProfileStore
     @State private var jobStore: JobStore
     @State private var externalFileIntake: ExternalFileIntake
-    @State private var showAbout = false
     @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.auto.rawValue
     @AppStorage(JobRunner.playCompletionSoundDefaultsKey) private var playCompletionSoundOnCompletion = false
     @FocusedBinding(\.showProfilesDrawerBinding) private var focusedShowProfilesDrawer: Bool?
     @FocusedBinding(\.showOperationsDrawerBinding) private var focusedShowOperationsDrawer: Bool?
+    @FocusedValue(\.windowCommandActions) private var focusedWindowCommandActions
     @NSApplicationDelegateAdaptor(DockFileOpenDelegate.self) private var dockFileOpenDelegate
 
     init() {
@@ -84,6 +86,36 @@ struct WordpressMediaUploaderApp: App {
         NSApp.appearance = appearanceMode.nsAppearance
     }
 
+    private func showAboutWindow() {
+        NSApp.orderFrontStandardAboutPanel(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openGitHubRepository() {
+        NSWorkspace.shared.open(Self.repositoryURL)
+    }
+
+    private struct AppSettingsView: View {
+        @Binding var appearanceModeRaw: String
+        @Binding var playCompletionSoundOnCompletion: Bool
+
+        var body: some View {
+            Form {
+                Picker("Appearance", selection: $appearanceModeRaw) {
+                    ForEach(AppearanceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Toggle("Play sound when uploads complete", isOn: $playCompletionSoundOnCompletion)
+            }
+            .formStyle(.grouped)
+            .padding(20)
+            .frame(width: 420)
+        }
+    }
+
     var body: some Scene {
         WindowGroup("") {
             AppWindowRootView(
@@ -101,9 +133,6 @@ struct WordpressMediaUploaderApp: App {
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 jobStore.removeActiveJobs()
             }
-            .sheet(isPresented: $showAbout) {
-                AboutView()
-            }
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
@@ -112,27 +141,152 @@ struct WordpressMediaUploaderApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About \(appDisplayName)") {
-                    showAbout = true
+                    showAboutWindow()
                 }
             }
 
+            // File menu
+            CommandGroup(replacing: .newItem) {
+                Button("New Profile…") {
+                    focusedWindowCommandActions?.createProfile()
+                }
+                .keyboardShortcut("n", modifiers: [.command])
+                .disabled(focusedWindowCommandActions == nil)
+            }
+
+            CommandGroup(after: .newItem) {
+                Button("Edit Selected Profile…") {
+                    focusedWindowCommandActions?.editSelectedProfile()
+                }
+                .keyboardShortcut("e", modifiers: [.command])
+                .disabled(!(focusedWindowCommandActions?.canEditSelectedProfile ?? false))
+
+                Button("Delete Selected Profile") {
+                    focusedWindowCommandActions?.deleteSelectedProfile()
+                }
+                .keyboardShortcut(.delete, modifiers: [.command, .option])
+                .disabled(!(focusedWindowCommandActions?.canDeleteSelectedProfile ?? false))
+            }
+
+            CommandGroup(after: .saveItem) {
+                Divider()
+                Button("Start Upload") {
+                    focusedWindowCommandActions?.startUpload()
+                }
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(!(focusedWindowCommandActions?.canStartUpload ?? false))
+
+                Button("Stop Upload") {
+                    focusedWindowCommandActions?.stopUpload()
+                }
+                .keyboardShortcut(".", modifiers: [.command])
+                .disabled(!(focusedWindowCommandActions?.canStopUpload ?? false))
+
+                Button("Retry Failed Files") {
+                    focusedWindowCommandActions?.retryFailedFiles()
+                }
+                .keyboardShortcut("r", modifiers: [.command])
+                .disabled(!(focusedWindowCommandActions?.canRetryFailedFiles ?? false))
+
+                Divider()
+                Button("Reset Queue and Current Job") {
+                    focusedWindowCommandActions?.resetQueueAndCurrentJob()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!(focusedWindowCommandActions?.canResetQueueAndCurrentJob ?? false))
+
+                Button("Clear Job History") {
+                    focusedWindowCommandActions?.clearJobHistory()
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .disabled(!(focusedWindowCommandActions?.canClearJobHistory ?? false))
+            }
+
+            CommandGroup(replacing: .importExport) {
+                Button("Add Files…") {
+                    focusedWindowCommandActions?.addFiles()
+                }
+                .keyboardShortcut("o", modifiers: [.command])
+                .disabled(focusedWindowCommandActions == nil)
+
+                Button("Delete Selected Files") {
+                    focusedWindowCommandActions?.deleteSelectedFiles()
+                }
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(!(focusedWindowCommandActions?.canDeleteSelectedFiles ?? false))
+
+                Divider()
+                Menu("Reports") {
+                    Button("Open Current Job Log") {
+                        focusedWindowCommandActions?.openLog()
+                    }
+                    .keyboardShortcut("l", modifiers: [.command, .option])
+                    .disabled(!(focusedWindowCommandActions?.canOpenLog ?? false))
+
+                    Button("Copy Current Job Report") {
+                        focusedWindowCommandActions?.copyReport()
+                    }
+                    .keyboardShortcut("c", modifiers: [.command, .option])
+                    .disabled(!(focusedWindowCommandActions?.canCopyReport ?? false))
+
+                    Divider()
+                    Button("Export JSON Report…") {
+                        focusedWindowCommandActions?.exportJSONReport()
+                    }
+                    .keyboardShortcut("j", modifiers: [.command, .option])
+                    .disabled(!(focusedWindowCommandActions?.canExportJSONReport ?? false))
+
+                    Button("Export CSV Report…") {
+                        focusedWindowCommandActions?.exportCSVReport()
+                    }
+                    .keyboardShortcut("v", modifiers: [.command, .option])
+                    .disabled(!(focusedWindowCommandActions?.canExportCSVReport ?? false))
+                }
+            }
+
+            // View menu
             CommandGroup(after: .toolbar) {
                 Divider()
-                Toggle("Show Profiles Drawer", isOn: focusedShowProfilesDrawerToggleBinding)
+                Toggle("Show Sidebar", isOn: focusedShowProfilesDrawerToggleBinding)
                     .disabled(focusedShowProfilesDrawer == nil)
-                    .keyboardShortcut("p", modifiers: [.command, .shift])
-                Toggle("Show Operations Drawer", isOn: focusedShowOperationsDrawerToggleBinding)
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+
+                Toggle("Show Inspector", isOn: focusedShowOperationsDrawerToggleBinding)
                     .disabled(focusedShowOperationsDrawer == nil)
-                    .keyboardShortcut("o", modifiers: [.command, .shift])
-                Toggle("Play Sound on Completion", isOn: $playCompletionSoundOnCompletion)
+                    .keyboardShortcut("i", modifiers: [.command, .option])
 
                 Divider()
-                Picker("Appearance", selection: $appearanceModeRaw) {
-                    ForEach(AppearanceMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode.rawValue)
-                    }
+                Button("Show Active Job") {
+                    focusedWindowCommandActions?.showActiveJobTab()
+                }
+                .keyboardShortcut("1", modifiers: [.command])
+                .disabled(focusedWindowCommandActions == nil)
+
+                Button("Show Terminal") {
+                    focusedWindowCommandActions?.showTerminalTab()
+                }
+                .keyboardShortcut("2", modifiers: [.command])
+                .disabled(focusedWindowCommandActions == nil)
+
+                Button("Show Job History") {
+                    focusedWindowCommandActions?.showJobHistoryTab()
+                }
+                .keyboardShortcut("3", modifiers: [.command])
+                .disabled(focusedWindowCommandActions == nil)
+            }
+
+            CommandGroup(replacing: .help) {
+                Button("Project on GitHub") {
+                    openGitHubRepository()
                 }
             }
+        }
+
+        Settings {
+            AppSettingsView(
+                appearanceModeRaw: $appearanceModeRaw,
+                playCompletionSoundOnCompletion: $playCompletionSoundOnCompletion
+            )
         }
     }
 }
@@ -157,56 +311,5 @@ private struct AppWindowRootView: View {
             jobRunner: jobRunner,
             externalFileIntake: externalFileIntake
         )
-    }
-}
-
-private struct AboutView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private var appDisplayName: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
-            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
-            ?? "Wordpress Media Uploader"
-    }
-
-    private var versionString: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            ?? "—"
-    }
-
-    private var buildString: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-            ?? "—"
-    }
-
-    private static let repoURL = URL(string: "https://github.com/ddegner/WordpressMediaUploader")!
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 96, height: 96)
-
-            VStack(spacing: 6) {
-                Text(appDisplayName)
-                    .font(.title2.weight(.semibold))
-
-                Text("Version \(versionString) (\(buildString))")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            Link("GitHub Repository", destination: Self.repoURL)
-                .font(.callout)
-
-            HStack {
-                Spacer()
-                Button("OK") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(24)
-        .frame(width: 420)
     }
 }

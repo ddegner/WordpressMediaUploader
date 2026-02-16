@@ -1,0 +1,189 @@
+{
+  "" : {
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressMediaUploaderApp-primary.dia",
+    "emit-module-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressMediaUploaderApp-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressMediaUploaderApp-primary-emit-module.dia",
+    "pch" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressMediaUploaderApp-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressMediaUploaderApp-primary.swiftdeps"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Models/Models.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/Models~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Runner/JobRunner.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobRunner~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Runner/SSHTransport.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/SSHTransport~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Services/KeychainService.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/KeychainService~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Stores/JobStore.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/JobStore~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Stores/ProfileStore.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileStore~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/UI/ContentView.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ContentView~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/UI/FocusedBindings.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FocusedBindings~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/UI/ProfileEditorView.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ProfileEditorView~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Utilities/AppPaths.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/AppPaths~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Utilities/CommandRunner.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/CommandRunner~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Utilities/ExternalFileIntake.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ExternalFileIntake~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Utilities/FileDropHelper.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/FileDropHelper~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Utilities/LogWriter.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/LogWriter~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Utilities/ReportBuilder.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ReportBuilder~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/Utilities/ShellHelpers.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/ShellHelpers~partial.swiftmodule"
+  },
+  "/Users/degner/Documents/GitHub/WordpressImageUploader/Sources/WordpressImageUploaderApp/WordpressImageUploaderApp.swift" : {
+    "const-values" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp.swiftconstvalues",
+    "dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp.d",
+    "diagnostics" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp.dia",
+    "index-unit-output-path" : "/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp.o",
+    "llvm-bc" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp.bc",
+    "object" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp.o",
+    "swift-dependencies" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp.swiftdeps",
+    "swiftmodule" : "/Users/degner/Documents/GitHub/WordpressImageUploader/.derived/Build/Intermediates.noindex/WordpressMediaUploader.build/Debug/WordpressMediaUploaderApp.build/Objects-normal/arm64/WordpressImageUploaderApp~partial.swiftmodule"
+  }
+}

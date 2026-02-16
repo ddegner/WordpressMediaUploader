@@ -34,7 +34,7 @@ final class FileDropHelperTests: XCTestCase {
 
         let resolved = resolveImageFileURLs(from: [root])
         let names = Set(resolved.map(\.lastPathComponent))
-        XCTAssertEqual(names, Set(["a.jpg", "b.png"]))
+        XCTAssertEqual(names, Set(["a.jpg", "b.png", "c.pdf"]))
     }
 
     func testResolveImageFileURLsDeduplicatesByPath() throws {

@@ -307,20 +307,20 @@ final class JobRunner {
                 try await self.ensureRemoteJobDirectories(profile: profile, auth: auth, writer: writer, jobID: jobID)
 
                 try Task.checkCancellation()
-                await self.uploadAndVerify(profile: profile, auth: auth, writer: writer, jobID: jobID)
+                try await self.uploadAndVerify(profile: profile, auth: auth, writer: writer, jobID: jobID)
 
                 try Task.checkCancellation()
-                await self.importVerifiedFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
+                try await self.importVerifiedFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
 
                 try Task.checkCancellation()
-                await self.regenerateImported(profile: profile, auth: auth, writer: writer, jobID: jobID)
+                try await self.regenerateImported(profile: profile, auth: auth, writer: writer, jobID: jobID)
 
                 try Task.checkCancellation()
                 if !profile.keepRemoteFiles {
-                    await self.cleanupRemoteFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
+                    try await self.cleanupRemoteFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
                 }
 
-                self.finishJob(jobID: jobID)
+                self.finishJob(jobID: jobID, profile: profile)
             } catch is CancellationError {
                 self.markJobCancelled(jobID: jobID, writer: writer)
             } catch {
@@ -334,13 +334,13 @@ final class JobRunner {
                         mutable.activeFileId = nil
                     }
                     self.errorBanner = error.localizedDescription
-                    self.playCompletionSoundIfEnabled(success: false)
+                    self.playCompletionSoundIfEnabled(success: false, profile: profile)
                 }
             }
         }
     }
 
-    private func finishJob(jobID: UUID) {
+    private func finishJob(jobID: UUID, profile: ServerProfile) {
         guard let job = jobSnapshot(id: jobID) else { return }
 
         if job.localFiles.contains(where: { $0.status == .failed }) {
@@ -351,7 +351,7 @@ final class JobRunner {
                 mutable.activeFileId = nil
             }
             errorBanner = jobSnapshot(id: jobID)?.errorMessage
-            playCompletionSoundIfEnabled(success: false)
+            playCompletionSoundIfEnabled(success: false, profile: profile)
         } else {
             mutateJob(id: jobID) { mutable in
                 mutable.step = .finished
@@ -360,7 +360,7 @@ final class JobRunner {
                 mutable.importProgress = 1
                 mutable.activeFileId = nil
             }
-            playCompletionSoundIfEnabled(success: true)
+            playCompletionSoundIfEnabled(success: true, profile: profile)
         }
     }
 
@@ -424,7 +424,8 @@ final class JobRunner {
         auth: SSHAuthContext,
         writer: LogWriter,
         jobID: UUID
-    ) async {
+    ) async throws {
+        try Task.checkCancellation()
         guard let job = jobSnapshot(id: jobID) else { return }
 
         mutateJob(id: jobID) {
@@ -454,6 +455,7 @@ final class JobRunner {
                 )
 
                 for (index, file) in candidates.enumerated() {
+                    try Task.checkCancellation()
                     mutateJob(id: jobID) { mutable in
                         mutable.activeFileId = file.id
                     }
@@ -489,6 +491,9 @@ final class JobRunner {
                             mutable.uploadProgress = Double(index + 1) / Double(candidates.count)
                         }
                     } catch {
+                        if Task.isCancelled {
+                            throw CancellationError()
+                        }
                         mutateJob(id: jobID) { mutable in
                             if let idx = mutable.localFiles.firstIndex(where: { $0.id == file.id }) {
                                 mutable.localFiles[idx].status = .failed
@@ -500,6 +505,9 @@ final class JobRunner {
                     }
                 }
             } catch {
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
                 appendLog("Upload setup failed: \(error.localizedDescription)", writer: writer)
                 mutateJob(id: jobID) { mutable in
                     for idx in mutable.localFiles.indices {
@@ -512,12 +520,13 @@ final class JobRunner {
             }
         }
 
+        try Task.checkCancellation()
         mutateJob(id: jobID) {
             $0.step = .verifying
             $0.activeFileId = nil
         }
 
-        await verifyUploadedFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
+        try await verifyUploadedFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
     }
 
     private func verifyUploadedFiles(
@@ -525,7 +534,8 @@ final class JobRunner {
         auth: SSHAuthContext,
         writer: LogWriter,
         jobID: UUID
-    ) async {
+    ) async throws {
+        try Task.checkCancellation()
         guard let job = jobSnapshot(id: jobID) else { return }
 
         let verifyTargets = job.localFiles.filter { $0.status == .uploaded }
@@ -534,6 +544,7 @@ final class JobRunner {
         }
 
         for file in verifyTargets {
+            try Task.checkCancellation()
             mutateJob(id: jobID) { mutable in
                 mutable.activeFileId = file.id
             }
@@ -562,6 +573,9 @@ final class JobRunner {
                     }
                 }
             } catch {
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
                 updateFile(jobID: jobID, id: file.id) {
                     $0.status = .failed
                     $0.errorMessage = error.localizedDescription
@@ -579,7 +593,8 @@ final class JobRunner {
         auth: SSHAuthContext,
         writer: LogWriter,
         jobID: UUID
-    ) async {
+    ) async throws {
+        try Task.checkCancellation()
         guard let job = jobSnapshot(id: jobID) else { return }
 
         mutateJob(id: jobID) {
@@ -597,6 +612,7 @@ final class JobRunner {
         }
 
         for (index, file) in importTargets.enumerated() {
+            try Task.checkCancellation()
             mutateJob(id: jobID) { mutable in
                 mutable.activeFileId = file.id
             }
@@ -642,6 +658,9 @@ final class JobRunner {
                     mutable.importProgress = Double(index + 1) / Double(importTargets.count)
                 }
             } catch {
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
                 let message = timeoutAwareMessage(
                     for: error,
                     fallback: "Import failed for \(file.filename): \(error.localizedDescription)"
@@ -667,7 +686,8 @@ final class JobRunner {
         auth: SSHAuthContext,
         writer: LogWriter,
         jobID: UUID
-    ) async {
+    ) async throws {
+        try Task.checkCancellation()
         guard let job = jobSnapshot(id: jobID) else { return }
 
         mutateJob(id: jobID) {
@@ -684,6 +704,7 @@ final class JobRunner {
         }
 
         for file in targets {
+            try Task.checkCancellation()
             mutateJob(id: jobID) { mutable in
                 mutable.activeFileId = file.id
             }
@@ -706,6 +727,9 @@ final class JobRunner {
                     $0.errorMessage = nil
                 }
             } catch {
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
                 updateFile(jobID: jobID, id: file.id) {
                     $0.status = .failed
                     $0.errorMessage = error.localizedDescription
@@ -723,7 +747,8 @@ final class JobRunner {
         auth: SSHAuthContext,
         writer: LogWriter,
         jobID: UUID
-    ) async {
+    ) async throws {
+        try Task.checkCancellation()
         guard let job = jobSnapshot(id: jobID) else { return }
 
         let command = "rm -rf \(shellSingleQuote(job.remoteJobDir))"
@@ -736,6 +761,9 @@ final class JobRunner {
                 onLine: lineLogger(writer: writer)
             )
         } catch {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
             appendLog("Remote cleanup skipped: \(error.localizedDescription)", writer: writer)
         }
     }
@@ -865,8 +893,9 @@ final class JobRunner {
         return fallback
     }
 
-    private func playCompletionSoundIfEnabled(success: Bool) {
-        guard UserDefaults.standard.bool(forKey: Self.playCompletionSoundDefaultsKey) else { return }
+    private func playCompletionSoundIfEnabled(success: Bool, profile: ServerProfile) {
+        let globalSettingEnabled = UserDefaults.standard.bool(forKey: Self.playCompletionSoundDefaultsKey)
+        guard profile.playCompletionSoundOnCompletion || globalSettingEnabled else { return }
 
         let soundName: NSSound.Name = success ? .init("Glass") : .init("Basso")
         if NSSound(named: soundName)?.play() != true {

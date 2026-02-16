@@ -113,7 +113,7 @@ private final class OutputCollector: @unchecked Sendable {
 }
 
 actor CommandRunner {
-    private var activeProcess: Process?
+    private var activeProcesses: [ObjectIdentifier: Process] = [:]
 
     func run(
         _ spec: CommandSpec,
@@ -156,7 +156,8 @@ actor CommandRunner {
             collector.consume(stream: .stderr, data: data)
         }
 
-        activeProcess = process
+        let processID = ObjectIdentifier(process)
+        activeProcesses[processID] = process
 
         var launchError: String?
         let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
@@ -174,7 +175,7 @@ actor CommandRunner {
 
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
-        activeProcess = nil
+        activeProcesses[processID] = nil
 
         if exitCode == Int32.min {
             throw CommandRunnerError.launchFailed(launchError ?? spec.displayName)
@@ -191,6 +192,8 @@ actor CommandRunner {
     }
 
     func cancelActiveProcess() {
-        activeProcess?.terminate()
+        for process in activeProcesses.values {
+            process.terminate()
+        }
     }
 }

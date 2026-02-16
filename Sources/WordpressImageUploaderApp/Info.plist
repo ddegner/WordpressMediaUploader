@@ -29,11 +29,12 @@
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
 			<string>Alternate</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>public.image</string>
-			</array>
-		</dict>
+				<key>LSItemContentTypes</key>
+				<array>
+					<string>public.image</string>
+					<string>com.adobe.pdf</string>
+				</array>
+			</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Folders</string>
