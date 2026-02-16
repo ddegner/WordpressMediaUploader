@@ -250,7 +250,7 @@ struct ContentView: View {
     @State private var profileEditorDraft: ProfileEditorDraft?
     @State private var showErrorAlert = false
     @State private var showProfilesDrawer = true
-    @State private var showOperationsDrawer = true
+    @State private var showOperationsDrawer = false
     @State private var selectedProfileId: UUID?
     @State private var operationsTab: OperationsTab = .activeJob
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
@@ -348,6 +348,7 @@ struct ContentView: View {
         .focusedSceneValue(\.windowCommandActions, windowCommandActions)
         .onAppear {
             splitViewVisibility = showProfilesDrawer ? .all : .detailOnly
+            showOperationsDrawer = true
             ingestExternalFiles()
             if selectedProfileId == nil {
                 selectedProfileId = profileStore.profiles.first?.id

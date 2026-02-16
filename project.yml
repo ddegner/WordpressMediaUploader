@@ -20,12 +20,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.degner.WordpressMediaUploader
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Sources/WordpressImageUploaderApp/Info.plist
-        INFOPLIST_KEY_CFBundleDisplayName: Wordpress Media Uploader
-        INFOPLIST_KEY_CFBundleName: Wordpress Media Uploader
+        INFOPLIST_KEY_CFBundleDisplayName: WP Media Uploader
+        INFOPLIST_KEY_CFBundleName: WP Media Uploader
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         INFOPLIST_KEY_NSRequiresAquaSystemAppearance: NO
-        PRODUCT_NAME: Wordpress Media Uploader
+        PRODUCT_NAME: WP Media Uploader
         PRODUCT_MODULE_NAME: WordpressMediaUploaderApp
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CURRENT_PROJECT_VERSION: 1
@@ -42,7 +42,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.degner.WordpressMediaUploaderTests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Wordpress Media Uploader.app/Contents/MacOS/Wordpress Media Uploader"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/WP Media Uploader.app/Contents/MacOS/WP Media Uploader"
 schemes:
   WordpressMediaUploader:
     build:

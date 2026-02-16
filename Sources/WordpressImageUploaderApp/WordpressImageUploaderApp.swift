@@ -65,7 +65,7 @@ struct WordpressMediaUploaderApp: App {
     private var appDisplayName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
-            ?? "Wordpress Media Uploader"
+            ?? "WP Media Uploader"
     }
 
     private var focusedShowProfilesDrawerToggleBinding: Binding<Bool> {

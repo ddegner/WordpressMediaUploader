@@ -1,7 +1,8 @@
 import Foundation
 
 enum AppPaths {
-    static let appFolderName = "WordpressMediaUploader"
+    static let appFolderName = "WPMediaUploader"
+    private static let legacyAppFolderName = "WordpressMediaUploader"
 
     static var appSupportDirectory: URL {
         let fm = FileManager.default
@@ -10,9 +11,27 @@ enum AppPaths {
             ?? fm.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library", isDirectory: true)
                 .appendingPathComponent("Application Support", isDirectory: true)
-        let dir = base.appendingPathComponent(appFolderName, isDirectory: true)
-        ensureDirectory(dir)
-        return dir
+        let preferredDir = base.appendingPathComponent(appFolderName, isDirectory: true)
+        let legacyDir = base.appendingPathComponent(legacyAppFolderName, isDirectory: true)
+
+        if fm.fileExists(atPath: preferredDir.path) {
+            ensureDirectory(preferredDir)
+            return preferredDir
+        }
+
+        if fm.fileExists(atPath: legacyDir.path) {
+            do {
+                try fm.moveItem(at: legacyDir, to: preferredDir)
+                ensureDirectory(preferredDir)
+                return preferredDir
+            } catch {
+                ensureDirectory(legacyDir)
+                return legacyDir
+            }
+        }
+
+        ensureDirectory(preferredDir)
+        return preferredDir
     }
 
     static var profilesFile: URL {

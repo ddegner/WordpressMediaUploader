@@ -1,7 +1,7 @@
 import Foundation
 
 final class LogWriter: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "WordpressMediaUploader.LogWriter")
+    private let queue = DispatchQueue(label: "WPMediaUploader.LogWriter")
     private let dateFormatter = ISO8601DateFormatter()
     private var handle: FileHandle?
 

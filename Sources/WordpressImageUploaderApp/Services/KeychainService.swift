@@ -20,7 +20,8 @@ enum KeychainServiceError: Error, LocalizedError {
 }
 
 struct KeychainService {
-    private static let serviceName = "WordpressMediaUploader"
+    private static let serviceName = "WPMediaUploader"
+    private static let legacyServiceName = "WordpressMediaUploader"
 
     static func setSecret(_ secret: String, account: String) throws {
         guard let data = secret.data(using: .utf8) else {
@@ -58,9 +59,23 @@ struct KeychainService {
     }
 
     static func getSecret(account: String) throws -> String? {
+        if let secret = try getSecret(account: account, service: serviceName) {
+            return secret
+        }
+
+        if let secret = try getSecret(account: account, service: legacyServiceName) {
+            // Best-effort migration into the new service name.
+            try? setSecret(secret, account: account)
+            return secret
+        }
+
+        return nil
+    }
+
+    private static func getSecret(account: String, service: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -87,16 +102,22 @@ struct KeychainService {
     }
 
     static func deleteSecret(account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account
-        ]
+        var firstFailure: OSStatus?
+        for currentService in [serviceName, legacyServiceName] {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: currentService,
+                kSecAttrAccount as String: account
+            ]
 
-        let status = SecItemDelete(query as CFDictionary)
-        if status == errSecSuccess || status == errSecItemNotFound {
-            return
+            let status = SecItemDelete(query as CFDictionary)
+            if status != errSecSuccess, status != errSecItemNotFound, firstFailure == nil {
+                firstFailure = status
+            }
         }
-        throw KeychainServiceError.osStatus(status)
+
+        if let firstFailure {
+            throw KeychainServiceError.osStatus(firstFailure)
+        }
     }
 }

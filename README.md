@@ -1,8 +1,9 @@
-# Wordpress Media Uploader
+# WP Media Uploader
 
 [Download macOS binary (v0.7)](https://github.com/ddegner/WordpressMediaUploader/raw/main/WordpressMediaUploader-v0.7-macOS.zip)
 
-A native macOS app built in SwiftUI for batch-uploading images to a remote WordPress server.
+WordPress media uploader for macOS.
+An independent, open source macOS app to upload media to WordPress sites.
 
 Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to handle large media libraries efficiently.
 
@@ -81,7 +82,7 @@ open "WordpressMediaUploader.xcodeproj"
 ## Notes
 
 - Default staging path is `~/wp-media-import`
-- Job and profile data are saved under `~/Library/Application Support/WordpressMediaUploader/`
+- Job and profile data are saved under `~/Library/Application Support/WPMediaUploader/`
 - Passwords and key passphrases are stored in the macOS Keychain
 
 ## License
