@@ -654,8 +654,31 @@ final class JobRunner {
                     if !mutable.importedIds.contains(attachmentId) {
                         mutable.importedIds.append(attachmentId)
                     }
+                }
+                updateImportProgress(
+                    jobID: jobID,
+                    completedCount: index + 1,
+                    totalCount: importTargets.count
+                )
 
-                    mutable.importProgress = Double(index + 1) / Double(importTargets.count)
+                do {
+                    try await regenerateAttachment(
+                        profile: profile,
+                        auth: auth,
+                        writer: writer,
+                        attachmentId: attachmentId,
+                        fileName: file.filename
+                    )
+
+                    updateFile(jobID: jobID, id: file.id) {
+                        $0.status = .regenerated
+                        $0.errorMessage = nil
+                    }
+                } catch {
+                    if Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    markRegenerationFailed(jobID: jobID, file: file, error: error, writer: writer)
                 }
             } catch {
                 if Task.isCancelled {
@@ -671,8 +694,12 @@ final class JobRunner {
                         mutable.localFiles[idx].status = .failed
                         mutable.localFiles[idx].errorMessage = message
                     }
-                    mutable.importProgress = Double(index + 1) / Double(importTargets.count)
                 }
+                updateImportProgress(
+                    jobID: jobID,
+                    completedCount: index + 1,
+                    totalCount: importTargets.count
+                )
             }
         }
 
@@ -690,17 +717,17 @@ final class JobRunner {
         try Task.checkCancellation()
         guard let job = jobSnapshot(id: jobID) else { return }
 
-        mutateJob(id: jobID) {
-            $0.step = .regenerating
-            $0.activeFileId = nil
-        }
-
         let targets = job.localFiles.filter {
             $0.importAttachmentId != nil && $0.status == .imported
         }
 
         if targets.isEmpty {
             return
+        }
+
+        mutateJob(id: jobID) {
+            $0.step = .regenerating
+            $0.activeFileId = nil
         }
 
         for file in targets {
@@ -710,16 +737,12 @@ final class JobRunner {
             }
             do {
                 guard let attachmentId = file.importAttachmentId else { continue }
-                let wpPath = shellSingleQuote(profile.wpRootPath)
-                let baseCommand =
-                    "wp --path=\(wpPath) media regenerate \(attachmentId) --only-missing --yes"
-                let command = wrapWithOptionalTimeout(command: baseCommand, seconds: 600)
-                _ = try await transport.runSSH(
+                try await regenerateAttachment(
                     profile: profile,
                     auth: auth,
-                    remoteCommand: command,
                     writer: writer,
-                    onLine: lineLogger(writer: writer)
+                    attachmentId: attachmentId,
+                    fileName: file.filename
                 )
 
                 updateFile(jobID: jobID, id: file.id) {
@@ -730,15 +753,58 @@ final class JobRunner {
                 if Task.isCancelled {
                     throw CancellationError()
                 }
-                updateFile(jobID: jobID, id: file.id) {
-                    $0.status = .failed
-                    $0.errorMessage = error.localizedDescription
-                }
+                markRegenerationFailed(jobID: jobID, file: file, error: error, writer: writer)
             }
         }
 
         mutateJob(id: jobID) { mutable in
             mutable.activeFileId = nil
+        }
+    }
+
+    private func regenerateAttachment(
+        profile: ServerProfile,
+        auth: SSHAuthContext,
+        writer: LogWriter,
+        attachmentId: Int,
+        fileName: String
+    ) async throws {
+        appendLog("Regenerating thumbnails for \(fileName) (attachment \(attachmentId)).", writer: writer)
+        let wpPath = shellSingleQuote(profile.wpRootPath)
+        let baseCommand =
+            "wp --path=\(wpPath) media regenerate \(attachmentId) --only-missing --yes"
+        let command = wrapWithOptionalTimeout(command: baseCommand, seconds: 600)
+        _ = try await transport.runSSH(
+            profile: profile,
+            auth: auth,
+            remoteCommand: command,
+            writer: writer,
+            onLine: lineLogger(writer: writer)
+        )
+    }
+
+    private func markRegenerationFailed(jobID: UUID, file: FileItem, error: Error, writer: LogWriter) {
+        let message = timeoutAwareMessage(
+            for: error,
+            fallback: "Thumbnail regeneration failed for \(file.filename): \(error.localizedDescription)"
+        )
+        appendLog(message, writer: writer)
+        updateFile(jobID: jobID, id: file.id) {
+            $0.status = .failed
+            $0.errorMessage = message
+        }
+    }
+
+    private func updateImportProgress(jobID: UUID, completedCount: Int, totalCount: Int) {
+        guard totalCount > 0 else {
+            mutateJob(id: jobID) {
+                $0.importProgress = 0
+            }
+            return
+        }
+
+        mutateJob(id: jobID) {
+            $0.importProgress = Double(completedCount) / Double(totalCount)
         }
     }
 

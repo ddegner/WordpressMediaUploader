@@ -140,6 +140,11 @@ struct ProfileEditorView: View {
                 }
                 .disabled(isTesting || !canSave)
 
+                if isTesting {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
                 if !testLines.isEmpty {
                     Label(testSuccess ? "Passed" : "Failed", systemImage: testSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(testSuccess ? .green : .red)

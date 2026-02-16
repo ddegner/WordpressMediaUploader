@@ -149,6 +149,7 @@ struct ContentView: View {
         case queued
         case uploading
         case processing
+        case imported
         case processed
         case failed
     }
@@ -657,10 +658,6 @@ struct ContentView: View {
                     .font(Self.sectionHeaderFont)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if jobRunner.isRunning {
-                    ProgressView()
-                        .controlSize(.small)
-                }
             }
 
             if let job = jobRunner.currentJob {
@@ -717,7 +714,7 @@ struct ContentView: View {
                                     .font(.callout)
                                 HStack(spacing: 4) {
                                     statusDot(for: job.step)
-                                    Text(job.step.rawValue)
+                                    Text(stepTitle(job.step))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     Text("• \(job.localFiles.count) files")
@@ -922,7 +919,7 @@ struct ContentView: View {
                 .foregroundStyle(progressColor(for: progressState))
                 .frame(width: 74, alignment: .trailing)
         }
-        .help(file.source == .queued ? "Queued for next run" : (item.errorMessage ?? ""))
+        .help(helpText(for: file))
         .contentShape(Rectangle())
     }
 
@@ -931,6 +928,8 @@ struct ContentView: View {
             switch state {
             case .failed:
                 Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            case .imported:
+                successStatusDot()
             case .processed:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .uploading, .processing:
@@ -977,7 +976,7 @@ struct ContentView: View {
         case .uploaded, .verified:
             return .processing
         case .imported:
-            return jobRunner.isRunning ? .processing : .processed
+            return .imported
         case .regenerated:
             return .processed
         case .failed:
@@ -990,6 +989,7 @@ struct ContentView: View {
         case .queued: return "queued"
         case .uploading: return "uploading"
         case .processing: return "processing"
+        case .imported: return "imported"
         case .processed: return "processed"
         case .failed: return "failed"
         }
@@ -998,9 +998,46 @@ struct ContentView: View {
     private func progressColor(for state: FileProgressState) -> Color {
         switch state {
         case .failed: return .red
-        case .processed: return .green
+        case .imported, .processed: return .green
         case .uploading, .processing: return .blue
         case .queued: return .secondary
+        }
+    }
+
+    private func helpText(for file: DisplayFile) -> String {
+        if file.source == .queued {
+            return "Queued for next run"
+        }
+
+        let item = file.item
+        switch item.status {
+        case .failed:
+            if let error = item.errorMessage, !error.isEmpty {
+                return error
+            }
+            return "Failed"
+        case .uploaded:
+            if let remotePath = item.remotePath, !remotePath.isEmpty {
+                return "Uploaded to \(remotePath)"
+            }
+            return "Uploaded"
+        case .verified:
+            if let remotePath = item.remotePath, !remotePath.isEmpty {
+                return "Verified upload at \(remotePath)"
+            }
+            return "Upload verified"
+        case .imported:
+            if let attachmentId = item.importAttachmentId {
+                return "Imported as attachment ID \(attachmentId)"
+            }
+            return "Imported"
+        case .regenerated:
+            if let attachmentId = item.importAttachmentId {
+                return "Imported as attachment ID \(attachmentId) and regenerated"
+            }
+            return "Imported and regenerated"
+        case .queued:
+            return "Waiting to upload"
         }
     }
 
@@ -1008,7 +1045,7 @@ struct ContentView: View {
     private func jobStatusHeader(job: Job) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label(job.step.rawValue, systemImage: stepIcon(job.step))
+                Label(stepTitle(job.step), systemImage: stepIcon(job.step))
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(stepColor(job.step))
                 Spacer()
@@ -1382,6 +1419,12 @@ struct ContentView: View {
             .frame(width: 8, height: 8)
     }
 
+    private func successStatusDot() -> some View {
+        Circle()
+            .fill(Color.green)
+            .frame(width: 8, height: 8)
+    }
+
     private func statusDot(for step: JobStep) -> some View {
         Circle()
             .fill(stepColor(step))
@@ -1407,6 +1450,10 @@ struct ContentView: View {
         case .failed: return "exclamationmark.triangle.fill"
         case .cancelled: return "xmark.circle"
         }
+    }
+
+    private func stepTitle(_ step: JobStep) -> String {
+        step.rawValue.capitalized
     }
 
     private static let byteFormatter: ByteCountFormatter = {

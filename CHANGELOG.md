@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9] - 2026-02-16
+
+### Added
+- Per-file `imported` progress state in the queue UI to clearly separate import completion from thumbnail regeneration completion.
+- Richer file status help text for uploaded, verified, imported, regenerated, and failed states.
+
+### Changed
+- Job status labels now render with title-cased step text for improved readability.
+- Profile connection test action now shows its progress indicator in the profile editor row where the test is initiated.
+- Published `WPMediaUploader-v0.9-macOS.zip` as a Developer ID signed and notarized macOS binary.
+
+### Fixed
+- Import loop now regenerates thumbnails immediately after each successful WordPress import.
+- Import progress updates are now applied consistently via shared progress update handling.
+- Regeneration failures now emit timeout-aware error messages and preserve clear per-file failure context.
+
 ## [0.8] - 2026-02-16
 
 ### Added
