@@ -9,6 +9,8 @@ Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to hand
 
 **Version 0.8** · macOS 14+
 
+[Privacy Policy](PRIVACY.md)
+
 ## Screenshots
 
 Quick visual tour of the app workflow:
