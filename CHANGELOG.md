@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.8] - 2026-02-16
+
+### Added
+- New macOS App Store asset set under `screenshots/app-store/macos/` in 1280x800, 2560x1600, and 2880x1800 variants.
+- App Store icon export at `screenshots/app-store/macos/app-icon/app-icon-1024.png`.
+
+### Changed
+- App display/product name now uses `WP Media Uploader`.
+- Updated release copy and metadata strings to match the new branding and macOS-focused description.
+- Refreshed README screenshots and `app-screenshot.png` captures from the latest app build.
+- Updated project marketing version to `0.8` and build number to `2`.
+
 ## [0.7] - 2026-02-14
 
 ### Added

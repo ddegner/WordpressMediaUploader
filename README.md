@@ -1,13 +1,13 @@
 # WP Media Uploader
 
-[Download macOS binary (v0.7)](https://github.com/ddegner/WordpressMediaUploader/raw/main/WordpressMediaUploader-v0.7-macOS.zip)
+[Download macOS binary (v0.8)](https://github.com/ddegner/WordpressMediaUploader/raw/main/WPMediaUploader-v0.8-macOS.zip)
 
 WordPress media uploader for macOS.
 An independent, open source macOS app to upload media to WordPress sites.
 
 Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to handle large media libraries efficiently.
 
-**Version 0.7** · macOS 14+
+**Version 0.8** · macOS 14+
 
 ## Screenshots
 
