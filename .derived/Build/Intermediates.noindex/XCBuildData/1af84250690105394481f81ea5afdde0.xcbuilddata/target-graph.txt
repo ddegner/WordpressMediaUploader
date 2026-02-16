@@ -1,4 +1,0 @@
-Target dependency graph (2 targets)
-Target 'WordpressMediaUploaderAppTests' in project 'WordpressMediaUploader'
-➜ Explicit dependency on target 'WordpressMediaUploaderApp' in project 'WordpressMediaUploader'
-Target 'WordpressMediaUploaderApp' in project 'WordpressMediaUploader' (no dependencies)

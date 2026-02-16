@@ -1,1 +1,0 @@
-@rpath/Wordpress Media Uploader.debug.dylib
