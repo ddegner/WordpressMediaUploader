@@ -33,6 +33,38 @@ final class ProfileStore {
         save()
     }
 
+    @discardableResult
+    func upsertProfile(
+        _ profile: ServerProfile,
+        password: String,
+        keyPassphrase: String
+    ) throws -> ServerProfile {
+        if profiles.contains(where: { $0.id == profile.id }) {
+            update(profile)
+        } else {
+            add(profile)
+        }
+
+        var storedProfile = profile
+        if profile.authType == .password {
+            storedProfile = try clearKeyPassphrase(for: storedProfile)
+            if trimmed(password).isEmpty {
+                storedProfile = try clearPassword(for: storedProfile)
+            } else {
+                storedProfile = try savePassword(password, for: storedProfile)
+            }
+        } else {
+            storedProfile = try clearPassword(for: storedProfile)
+            if keyPassphrase.isEmpty {
+                storedProfile = try clearKeyPassphrase(for: storedProfile)
+            } else {
+                storedProfile = try saveKeyPassphrase(keyPassphrase, for: storedProfile)
+            }
+        }
+
+        return storedProfile
+    }
+
     func deleteProfile(id: UUID) {
         guard let profile = profiles.first(where: { $0.id == id }) else { return }
 
@@ -118,5 +150,9 @@ final class ProfileStore {
         } catch {
             profiles = []
         }
+    }
+
+    private func trimmed(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

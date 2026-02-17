@@ -1,0 +1,289 @@
+import Foundation
+
+enum FileRowTone: Sendable {
+    case secondary
+    case progress
+    case success
+    case failure
+}
+
+enum FileRowStatus: Equatable, Sendable {
+    case queued
+    case uploading
+    case uploaded
+    case verifying
+    case verified
+    case importing
+    case imported
+    case regenerating
+    case regenerated
+    case failed
+
+    var label: String {
+        switch self {
+        case .queued: return "queued"
+        case .uploading: return "uploading"
+        case .uploaded: return "uploaded"
+        case .verifying: return "verifying"
+        case .verified: return "verified"
+        case .importing: return "importing"
+        case .imported: return "imported"
+        case .regenerating: return "regenerating"
+        case .regenerated: return "regenerated"
+        case .failed: return "failed"
+        }
+    }
+
+    var tone: FileRowTone {
+        switch self {
+        case .failed:
+            return .failure
+        case .regenerated:
+            return .success
+        case .uploading, .uploaded, .verifying, .verified, .importing, .imported, .regenerating:
+            return .progress
+        case .queued:
+            return .secondary
+        }
+    }
+
+    static func resolve(
+        item: FileItem,
+        isQueuedSource: Bool,
+        isActiveFile: Bool,
+        currentStep: JobStep?
+    ) -> FileRowStatus {
+        if isQueuedSource {
+            return .queued
+        }
+
+        if isActiveFile, let currentStep {
+            switch currentStep {
+            case .uploading:
+                return .uploading
+            case .verifying:
+                return .verifying
+            case .importing:
+                return .importing
+            case .regenerating:
+                return .regenerating
+            default:
+                break
+            }
+        }
+
+        switch item.status {
+        case .queued:
+            return .queued
+        case .uploaded:
+            return .uploaded
+        case .verified:
+            return .verified
+        case .imported:
+            return .imported
+        case .regenerated:
+            return .regenerated
+        case .failed:
+            return .failed
+        }
+    }
+}
+
+enum FileRowPresentation {
+    static func helpText(for item: FileItem, isQueuedSource: Bool) -> String {
+        if isQueuedSource {
+            return "Queued for next run"
+        }
+
+        switch item.status {
+        case .failed:
+            if let error = item.errorMessage, !error.isEmpty {
+                return error
+            }
+            return "Failed"
+        case .uploaded:
+            if let remotePath = item.remotePath, !remotePath.isEmpty {
+                return "Uploaded to \(remotePath)"
+            }
+            return "Uploaded"
+        case .verified:
+            if let remotePath = item.remotePath, !remotePath.isEmpty {
+                return "Verified upload at \(remotePath)"
+            }
+            return "Upload verified"
+        case .imported:
+            if let attachmentId = item.importAttachmentId {
+                return "Imported as attachment ID \(attachmentId)"
+            }
+            return "Imported"
+        case .regenerated:
+            if let attachmentId = item.importAttachmentId {
+                return "Imported as attachment ID \(attachmentId) and regenerated"
+            }
+            return "Imported and regenerated"
+        case .queued:
+            return "Waiting to upload"
+        }
+    }
+}
+
+struct JobRuntimeAnchor: Sendable {
+    let startedAt: Date
+    let processedBaseline: Int
+}
+
+private struct JobRuntimeEstimate: Sendable {
+    let filesPerMinute: Double
+    let secondsRemaining: TimeInterval
+}
+
+struct JobPresentation: Sendable {
+    let totalFiles: Int
+    let processedFiles: Int
+    let successfulFiles: Int
+    let failedFiles: Int
+    let remainingFiles: Int
+    let queuedFiles: Int
+    let uploadedFiles: Int
+    let verifiedFiles: Int
+    let importedFiles: Int
+
+    let statusLine: String
+    let progressLabel: String
+    let etaLine: String
+    let rateLine: String
+    let overallProgress: Double
+
+    static func processedFileCount(in job: Job) -> Int {
+        job.localFiles.filter { item in
+            item.status == .regenerated || item.status == .failed
+        }.count
+    }
+
+    static func make(
+        for job: Job,
+        activeFileStatus: FileRowStatus?,
+        now: Date,
+        anchor: JobRuntimeAnchor?,
+        durationFormatter: DateComponentsFormatter
+    ) -> JobPresentation {
+        let totalFiles = job.localFiles.count
+        let processedFiles = processedFileCount(in: job)
+        let successfulFiles = job.localFiles.filter { $0.status == .regenerated }.count
+        let failedFiles = job.failedCount
+        let remainingFiles = max(totalFiles - processedFiles, 0)
+        let queuedFiles = countFiles(in: job, status: .queued)
+        let uploadedFiles = countFiles(in: job, status: .uploaded)
+        let verifiedFiles = countFiles(in: job, status: .verified)
+        let importedFiles = countFiles(in: job, status: .imported)
+
+        let runtimeEstimate = estimateRuntime(
+            for: job,
+            processedFiles: processedFiles,
+            now: now,
+            anchor: anchor
+        )
+
+        let etaLine: String
+        if job.step.isTerminal {
+            etaLine = "ETA: Complete"
+        } else if let runtimeEstimate {
+            if runtimeEstimate.secondsRemaining < 60 {
+                etaLine = "ETA: <1 min"
+            } else {
+                let value = durationFormatter.string(from: runtimeEstimate.secondsRemaining) ?? "Estimating..."
+                etaLine = "ETA: \(value)"
+            }
+        } else {
+            etaLine = "ETA: Estimating..."
+        }
+
+        let rateLine: String
+        if let runtimeEstimate {
+            rateLine = String(format: "Rate: %.1f files/min", runtimeEstimate.filesPerMinute)
+        } else {
+            rateLine = job.step.isTerminal ? "Rate: n/a" : "Rate: Estimating..."
+        }
+
+        return JobPresentation(
+            totalFiles: totalFiles,
+            processedFiles: processedFiles,
+            successfulFiles: successfulFiles,
+            failedFiles: failedFiles,
+            remainingFiles: remainingFiles,
+            queuedFiles: queuedFiles,
+            uploadedFiles: uploadedFiles,
+            verifiedFiles: verifiedFiles,
+            importedFiles: importedFiles,
+            statusLine: statusLine(for: job, processedFiles: processedFiles, activeFileStatus: activeFileStatus),
+            progressLabel: totalFiles > 0 ? "\(processedFiles)/\(totalFiles) processed" : "0/0 processed",
+            etaLine: etaLine,
+            rateLine: rateLine,
+            overallProgress: progress(for: job, processedFiles: processedFiles)
+        )
+    }
+
+    private static func progress(for job: Job, processedFiles: Int) -> Double {
+        let total = job.localFiles.count
+        guard total > 0 else { return 0 }
+        return Double(processedFiles) / Double(total)
+    }
+
+    private static func countFiles(in job: Job, status: FileItemStatus) -> Int {
+        job.localFiles.filter { $0.status == status }.count
+    }
+
+    private static func statusLine(for job: Job, processedFiles: Int, activeFileStatus: FileRowStatus?) -> String {
+        let total = job.localFiles.count
+        guard total > 0 else { return "No files queued." }
+
+        if job.step == .preflight {
+            return "Running preflight checks and preparing staging."
+        }
+
+        if let activeFileId = job.activeFileId,
+           let index = job.localFiles.firstIndex(where: { $0.id == activeFileId })
+        {
+            let activeFile = job.localFiles[index]
+            let statusLabel = (activeFileStatus?.label ?? "working").capitalized
+            return "File \(index + 1) of \(total): \(activeFile.filename) • \(statusLabel)"
+        }
+
+        if job.step.isTerminal {
+            return "\(processedFiles)/\(total) files processed."
+        }
+
+        if let nextIndex = job.localFiles.firstIndex(where: { file in
+            file.status == .queued || file.status == .uploaded || file.status == .verified || file.status == .imported
+        }) {
+            return "Next file \(nextIndex + 1) of \(total): \(job.localFiles[nextIndex].filename)"
+        }
+
+        return "\(processedFiles)/\(total) files processed."
+    }
+
+    private static func estimateRuntime(
+        for job: Job,
+        processedFiles: Int,
+        now: Date,
+        anchor: JobRuntimeAnchor?
+    ) -> JobRuntimeEstimate? {
+        guard let anchor else { return nil }
+
+        let elapsed = now.timeIntervalSince(anchor.startedAt)
+        guard elapsed > 5 else { return nil }
+
+        let completedSinceStart = processedFiles - anchor.processedBaseline
+        guard completedSinceStart > 0 else { return nil }
+
+        let filesPerSecond = Double(completedSinceStart) / elapsed
+        guard filesPerSecond > 0 else { return nil }
+
+        let remainingFiles = max(job.localFiles.count - processedFiles, 0)
+        let secondsRemaining = Double(remainingFiles) / filesPerSecond
+        return JobRuntimeEstimate(
+            filesPerMinute: filesPerSecond * 60,
+            secondsRemaining: max(secondsRemaining, 0)
+        )
+    }
+}

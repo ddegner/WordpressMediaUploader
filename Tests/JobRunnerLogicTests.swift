@@ -189,6 +189,25 @@ final class JobRunnerLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testValidateProfileInvalidPortThrows() {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        var profile = ServerProfile.default
+        profile.host = "example.com"
+        profile.username = "user"
+        profile.wpRootPath = "/var/www"
+        profile.remoteStagingRoot = "~/staging"
+        profile.port = 0
+
+        XCTAssertThrowsError(try runner.validateProfile(profile, password: "secret")) { error in
+            let desc = error.localizedDescription
+            XCTAssertTrue(desc.contains("Port"), "Expected port error, got: \(desc)")
+        }
+    }
+
+    @MainActor
     func testValidateProfileValidSSHKeyProfile() {
         let profileStore = ProfileStore()
         let jobStore = JobStore()

@@ -764,35 +764,19 @@ final class JobRunner {
     }
 
     func validateProfile(_ profile: ServerProfile, password: String? = nil) throws {
-        if profile.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw JobRunnerError.profileIncomplete("Host is required")
-        }
-
-        if profile.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw JobRunnerError.profileIncomplete("Username is required")
-        }
-
-        if profile.wpRootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw JobRunnerError.profileIncomplete("WordPress root path is required")
-        }
-
-        if profile.remoteStagingRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw JobRunnerError.profileIncomplete("Remote staging root is required")
-        }
-
+        let effectivePassword: String?
         if profile.authType == .password {
-            let effectivePassword = password ?? profileStore.loadPassword(for: profile) ?? ""
-            if effectivePassword.isEmpty {
-                throw JobRunnerError.profileIncomplete("Password auth selected, but no password is stored in Keychain")
-            }
+            effectivePassword = password ?? profileStore.loadPassword(for: profile)
+        } else {
+            effectivePassword = nil
         }
 
-        if profile.authType == .sshKey,
-           let keyPath = profile.keyPath,
-           !keyPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           !FileManager.default.fileExists(atPath: keyPath)
-        {
-            throw JobRunnerError.profileIncomplete("SSH key file not found at \(keyPath)")
+        if let errorDetail = ProfileValidation.firstError(
+            for: profile,
+            password: effectivePassword,
+            context: .execution
+        ) {
+            throw JobRunnerError.profileIncomplete(errorDetail)
         }
     }
 

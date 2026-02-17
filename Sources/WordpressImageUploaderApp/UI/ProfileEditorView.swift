@@ -9,7 +9,6 @@ struct ProfileEditorView: View {
     @State private var profile: ServerProfile
     @State private var password: String
     @State private var keyPassphrase: String
-    @State private var portText: String
     @State private var showKeyImporter = false
 
     @State private var isTesting = false
@@ -28,7 +27,6 @@ struct ProfileEditorView: View {
         _profile = State(initialValue: profile)
         _password = State(initialValue: initialPassword ?? "")
         _keyPassphrase = State(initialValue: initialKeyPassphrase ?? "")
-        _portText = State(initialValue: String(profile.port))
     }
 
     var body: some View {
@@ -80,7 +78,7 @@ struct ProfileEditorView: View {
             TextField("Username", text: $profile.username, prompt: Text("deploy"))
 
             LabeledContent("Port") {
-                TextField("", text: portBinding, prompt: Text("22"))
+                TextField("", value: $profile.port, format: .number)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 80)
             }
@@ -163,42 +161,10 @@ struct ProfileEditorView: View {
     }
 
     private var canSave: Bool {
-        connectionStepValid && wordpressStepValid && defaultsStepValid
-    }
-
-    private var connectionStepValid: Bool {
-        let base = !trimmed(profile.name).isEmpty
-            && !trimmed(profile.host).isEmpty
-            && !trimmed(profile.username).isEmpty
-            && profile.port > 0
-
-        guard base else { return false }
-
-        switch profile.authType {
-        case .sshKey:
-            return isKeyPathValid
-        case .password:
-            return !trimmed(password).isEmpty
-        }
-    }
-
-    private var wordpressStepValid: Bool {
-        !trimmed(profile.wpRootPath).isEmpty
-    }
-
-    private var defaultsStepValid: Bool {
-        !trimmed(profile.remoteStagingRoot).isEmpty
-    }
-
-    private var isKeyPathValid: Bool {
-        guard let keyPath = profile.keyPath, !trimmed(keyPath).isEmpty else {
-            return true
-        }
-        return FileManager.default.fileExists(atPath: keyPath)
+        ProfileValidation.canSave(profile: profile, password: password)
     }
 
     private func saveAndClose() {
-        profile.port = Int(portText) ?? 0
         profile.bwLimitKBps = nil
 
         onSave(
@@ -207,17 +173,6 @@ struct ProfileEditorView: View {
             keyPassphrase
         )
         dismiss()
-    }
-
-    private var portBinding: Binding<String> {
-        Binding(
-            get: { portText },
-            set: { newValue in
-                let digits = newValue.filter(\.isNumber)
-                portText = digits
-                profile.port = Int(digits) ?? 0
-            }
-        )
     }
 
     private func runConnectionTest() {

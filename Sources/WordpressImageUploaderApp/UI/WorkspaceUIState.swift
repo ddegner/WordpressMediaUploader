@@ -17,7 +17,7 @@ enum WorkspaceOperationsTab: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
-        case .activeJob: return "play.fill"
+        case .activeJob: return "hourglass"
         case .terminal: return "chevron.left.forwardslash.chevron.right"
         case .history: return "clock"
         }
