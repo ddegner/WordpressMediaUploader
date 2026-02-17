@@ -104,7 +104,7 @@ private extension Color {
 
 struct ContentView: View {
     private static let profilesDrawerWidth: CGFloat = 260
-    private static let operationsDrawerWidth: CGFloat = 320
+    private static let operationsDrawerWidth: CGFloat = 360
     private static let workbenchMinWidth: CGFloat = 180
     private static let drawerTransitionDuration: TimeInterval = 0.24
     private static let visibleLogLineLimit = 300
@@ -556,16 +556,22 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Picker("Operations", selection: operationsTabBinding) {
                 ForEach(WorkspaceOperationsTab.allCases) { tab in
-                    Label(tab.title, systemImage: tab.systemImage).tag(tab)
+                    Image(systemName: tab.systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .imageScale(.large)
+                        .help(tab.title)
+                        .accessibilityLabel(tab.title)
+                        .tag(tab)
                 }
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .controlSize(.small)
+            .controlSize(.large)
             .frame(maxWidth: .infinity)
-            .frame(height: 36)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .frame(height: 46)
+            .padding(.horizontal, 0)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
             .background(drawerBackground)
 
             Group {

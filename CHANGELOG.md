@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0] - 2026-02-17
+
+### Added
+- Icon-only operations tab selector with larger hit targets and full-width layout in the right drawer.
+
+### Changed
+- Unified Active Job, Terminal, and Job History empty-state presentation with centered messaging and consistent drawer styling.
+- Updated operations tab icon mapping (Active Job now uses `hourglass` instead of a play glyph).
+- Bumped app version to `1.0` and build number to `4`.
+- Updated README download/version references for the `v1.0` release artifact.
+
+### Fixed
+- Reduced excess top spacing in the right operations drawer header area for better visual balance.
+
 ## [0.9] - 2026-02-16
 
 ### Added
