@@ -87,8 +87,27 @@ else
 fi
 
 echo "==> Stapling notarization ticket"
-xcrun stapler staple -v "$app_path"
-xcrun stapler validate -v "$app_path"
+staple_attempts=12
+staple_delay_seconds=10
+stapled=0
+
+for ((attempt = 1; attempt <= staple_attempts; attempt++)); do
+    echo "Staple attempt ${attempt}/${staple_attempts}"
+    if xcrun stapler staple -v "$app_path"; then
+        xcrun stapler validate -v "$app_path"
+        stapled=1
+        break
+    fi
+    if (( attempt < staple_attempts )); then
+        echo "Stapling failed, retrying in ${staple_delay_seconds}s..."
+        sleep "$staple_delay_seconds"
+    fi
+done
+
+if (( stapled == 0 )); then
+    echo "ERROR: Failed to staple notarization ticket after ${staple_attempts} attempts."
+    exit 1
+fi
 
 echo "==> Creating final distribution archive"
 ditto -c -k --sequesterRsrc --keepParent "$app_path" "$final_zip"
