@@ -42,6 +42,7 @@ struct WordpressMediaUploaderApp: App {
     @State private var externalFileIntake: ExternalFileIntake
     @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.auto.rawValue
     @AppStorage(JobRunner.playCompletionSoundDefaultsKey) private var playCompletionSoundOnCompletion = false
+    @AppStorage(JobRunner.showCompletionNotificationDefaultsKey) private var showCompletionNotificationOnCompletion = false
     @FocusedBinding(\.showProfilesDrawerBinding) private var focusedShowProfilesDrawer: Bool?
     @FocusedBinding(\.showOperationsDrawerBinding) private var focusedShowOperationsDrawer: Bool?
     @FocusedValue(\.windowCommandActions) private var focusedWindowCommandActions
@@ -98,6 +99,7 @@ struct WordpressMediaUploaderApp: App {
     private struct AppSettingsView: View {
         @Binding var appearanceModeRaw: String
         @Binding var playCompletionSoundOnCompletion: Bool
+        @Binding var showCompletionNotificationOnCompletion: Bool
 
         var body: some View {
             Form {
@@ -109,6 +111,7 @@ struct WordpressMediaUploaderApp: App {
                 .pickerStyle(.menu)
 
                 Toggle("Play sound when uploads complete", isOn: $playCompletionSoundOnCompletion)
+                Toggle("Show macOS notification when uploads complete", isOn: $showCompletionNotificationOnCompletion)
             }
             .formStyle(.grouped)
             .padding(20)
@@ -126,9 +129,16 @@ struct WordpressMediaUploaderApp: App {
             .preferredColorScheme(appearanceMode.preferredColorScheme)
             .onAppear {
                 applyAppearance()
+                if showCompletionNotificationOnCompletion {
+                    JobRunner.requestCompletionNotificationAuthorizationIfNeeded()
+                }
             }
             .onChange(of: appearanceModeRaw) { _, _ in
                 applyAppearance()
+            }
+            .onChange(of: showCompletionNotificationOnCompletion) { _, isEnabled in
+                guard isEnabled else { return }
+                JobRunner.requestCompletionNotificationAuthorizationIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 jobStore.removeActiveJobs()
@@ -223,6 +233,12 @@ struct WordpressMediaUploaderApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .option])
                     .disabled(!(focusedWindowCommandActions?.canOpenLog ?? false))
 
+                    Button("Copy Terminal") {
+                        focusedWindowCommandActions?.copyVisibleLog()
+                    }
+                    .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+                    .disabled(!(focusedWindowCommandActions?.canCopyVisibleLog ?? false))
+
                     Button("Copy Current Job Report") {
                         focusedWindowCommandActions?.copyReport()
                     }
@@ -280,12 +296,18 @@ struct WordpressMediaUploaderApp: App {
                     openGitHubRepository()
                 }
             }
+
+            CommandMenu("Notifications") {
+                Toggle("Play Sound on Completion", isOn: $playCompletionSoundOnCompletion)
+                Toggle("Show macOS Notification on Completion", isOn: $showCompletionNotificationOnCompletion)
+            }
         }
 
         Settings {
             AppSettingsView(
                 appearanceModeRaw: $appearanceModeRaw,
-                playCompletionSoundOnCompletion: $playCompletionSoundOnCompletion
+                playCompletionSoundOnCompletion: $playCompletionSoundOnCompletion,
+                showCompletionNotificationOnCompletion: $showCompletionNotificationOnCompletion
             )
         }
     }

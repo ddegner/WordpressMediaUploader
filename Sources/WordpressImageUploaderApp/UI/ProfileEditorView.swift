@@ -128,7 +128,6 @@ struct ProfileEditorView: View {
                 .font(.body.monospaced())
 
             Toggle("Keep remote files after success", isOn: $profile.keepRemoteFiles)
-            Toggle("Play notification sound on completion", isOn: $profile.playCompletionSoundOnCompletion)
         }
     }
 
@@ -138,7 +137,7 @@ struct ProfileEditorView: View {
                 Button(isTesting ? "Testing…" : "Test Connection") {
                     runConnectionTest()
                 }
-                .disabled(isTesting || !canSave)
+                .disabled(isTesting || !canSave || jobRunner.isRunning)
 
                 if isTesting {
                     ProgressView()
@@ -222,6 +221,12 @@ struct ProfileEditorView: View {
     }
 
     private func runConnectionTest() {
+        guard !jobRunner.isRunning else {
+            testLines = ["Stop the active upload before running Test Connection."]
+            testSuccess = false
+            return
+        }
+
         isTesting = true
         testLines = []
         testSuccess = false

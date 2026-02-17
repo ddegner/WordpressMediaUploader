@@ -107,10 +107,12 @@ struct ContentView: View {
     private static let operationsDrawerWidth: CGFloat = 320
     private static let workbenchMinWidth: CGFloat = 180
     private static let drawerTransitionDuration: TimeInterval = 0.24
+    private static let visibleLogLineLimit = 300
 
     private static let sectionHeaderFont: Font = .caption2.weight(.semibold)
     private static let editorBackground = Color(nsColor: .textBackgroundColor)
     private static let chromeBackground = Color(nsColor: .windowBackgroundColor)
+
 
     private struct ProfileEditorDraft: Identifiable {
         let id: UUID
@@ -145,42 +147,32 @@ struct ContentView: View {
         }
     }
 
-    private enum FileProgressState {
+    private enum FileRowStatus {
         case queued
         case uploading
-        case processing
+        case uploaded
+        case verifying
+        case verified
+        case importing
         case imported
-        case processed
+        case regenerating
+        case regenerated
         case failed
     }
 
-    private enum OperationsTab: String, CaseIterable, Identifiable {
-        case activeJob
-        case terminal
-        case history
+    private struct RuntimeEstimate {
+        let filesPerMinute: Double
+        let secondsRemaining: TimeInterval
+    }
 
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .activeJob: return "Active Job"
-            case .terminal: return "Terminal"
-            case .history: return "Job History"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .activeJob: return "play.fill"
-            case .terminal: return "chevron.left.forwardslash.chevron.right"
-            case .history: return "clock"
-            }
-        }
+    private struct RuntimeAnchor {
+        let startedAt: Date
+        let processedBaseline: Int
     }
 
     private struct OperationsTabsControl: NSViewRepresentable {
-        @Binding var selection: OperationsTab
-        let tabs: [OperationsTab]
+        @Binding var selection: WorkspaceOperationsTab
+        let tabs: [WorkspaceOperationsTab]
 
         final class Coordinator: NSObject {
             var parent: OperationsTabsControl
@@ -249,12 +241,13 @@ struct ContentView: View {
     @State private var isDropTargeted = false
     @State private var selectedFileRowIDs: Set<String> = []
     @State private var profileEditorDraft: ProfileEditorDraft?
-    @State private var showErrorAlert = false
+    @State private var showBlockingErrorAlert = false
     @State private var showProfilesDrawer = true
     @State private var showOperationsDrawer = false
     @State private var selectedProfileId: UUID?
-    @State private var operationsTab: OperationsTab = .activeJob
+    @State private var operationsTab: WorkspaceOperationsTab = .activeJob
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var runtimeAnchors: [UUID: RuntimeAnchor] = [:]
 
     private var selectedProfile: ServerProfile? {
         guard let selectedProfileId else { return nil }
@@ -277,13 +270,6 @@ struct ContentView: View {
     }
 
     private var operationsDrawerSceneBinding: Binding<Bool> {
-        Binding(
-            get: { showOperationsDrawer },
-            set: { setOperationsDrawerVisible($0) }
-        )
-    }
-
-    private var operationsDrawerPresentationBinding: Binding<Bool> {
         Binding(
             get: { showOperationsDrawer },
             set: { setOperationsDrawerVisible($0) }
@@ -315,108 +301,137 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $splitViewVisibility) {
-            sidebar
-                .navigationSplitViewColumnWidth(
-                    min: Self.profilesDrawerWidth,
-                    ideal: Self.profilesDrawerWidth,
-                    max: Self.profilesDrawerWidth
-                )
-                .background(drawerBackground)
-        } detail: {
-            middleWorkbench
-                .frame(minWidth: Self.workbenchMinWidth, maxWidth: .infinity)
-                .background(Self.editorBackground)
-                .toolbar {
-                    middleToolbarItems()
-                }
-        }
-        .toolbarRole(.editor)
-        .navigationSplitViewStyle(.balanced)
-        .inspector(isPresented: operationsDrawerPresentationBinding) {
-            operationsDrawer
-                .background(drawerBackground)
-        }
-        .inspectorColumnWidth(
-            min: Self.operationsDrawerWidth,
-            ideal: Self.operationsDrawerWidth,
-            max: Self.operationsDrawerWidth
-        )
-        .frame(minWidth: minimumWindowWidth, minHeight: 600)
-        .background(Self.editorBackground)
-        .focusedSceneValue(\.showProfilesDrawerBinding, profilesDrawerSceneBinding)
-        .focusedSceneValue(\.showOperationsDrawerBinding, operationsDrawerSceneBinding)
-        .focusedSceneValue(\.windowCommandActions, windowCommandActions)
-        .onAppear {
-            splitViewVisibility = showProfilesDrawer ? .all : .detailOnly
-            showOperationsDrawer = true
-            ingestExternalFiles()
-            if selectedProfileId == nil {
-                selectedProfileId = profileStore.profiles.first?.id
+        workspacePresentationLayer
+            .alert("Error", isPresented: $showBlockingErrorAlert, presenting: jobRunner.blockingError) { _ in
+                Button("OK") { jobRunner.blockingError = nil }
+            } message: { error in
+                Text(error)
             }
-            if profileStore.isEmpty {
-                presentNewProfileEditor()
+            .onChange(of: jobRunner.blockingError) { _, newValue in
+                showBlockingErrorAlert = newValue != nil
             }
-        }
-        .onChange(of: splitViewVisibility) { _, visibility in
-            setProfilesDrawerVisible(isSidebarVisible(for: visibility), syncSplitVisibility: false)
-        }
-        .onChange(of: externalFileIntake.sequence) { _, _ in
-            ingestExternalFiles()
-        }
-        .onChange(of: profileStore.profiles.map(\.id)) { _, ids in
-            if let selectedProfileId, !ids.contains(selectedProfileId) {
-                self.selectedProfileId = ids.first
-            } else if self.selectedProfileId == nil {
-                self.selectedProfileId = ids.first
-            }
-        }
-        .onOpenURL { url in
-            addFiles([url])
-        }
-        .alert("Error", isPresented: $showErrorAlert, presenting: jobRunner.errorBanner) { _ in
-            Button("OK") { jobRunner.errorBanner = nil }
-        } message: { error in
-            Text(error)
-        }
-        .onChange(of: jobRunner.errorBanner) { _, newValue in
-            showErrorAlert = newValue != nil
-        }
-        .sheet(item: $profileEditorDraft) { draft in
-            ProfileEditorView(
-                profile: draft.profile,
-                initialPassword: draft.initialPassword,
-                initialKeyPassphrase: draft.initialKeyPassphrase,
-                jobRunner: jobRunner
-            ) { updated, password, keyPassphrase in
-                if profileStore.profiles.contains(where: { $0.id == updated.id }) {
-                    profileStore.update(updated)
-                } else {
-                    profileStore.add(updated)
-                    selectedProfileId = updated.id
-                }
-                do {
-                    var storedProfile = updated
-                    if updated.authType == .password {
-                        storedProfile = try profileStore.clearKeyPassphrase(for: storedProfile)
-                        if password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            storedProfile = try profileStore.clearPassword(for: storedProfile)
-                        } else {
-                            storedProfile = try profileStore.savePassword(password, for: storedProfile)
-                        }
+            .sheet(item: $profileEditorDraft) { draft in
+                ProfileEditorView(
+                    profile: draft.profile,
+                    initialPassword: draft.initialPassword,
+                    initialKeyPassphrase: draft.initialKeyPassphrase,
+                    jobRunner: jobRunner
+                ) { updated, password, keyPassphrase in
+                    if profileStore.profiles.contains(where: { $0.id == updated.id }) {
+                        profileStore.update(updated)
                     } else {
-                        storedProfile = try profileStore.clearPassword(for: storedProfile)
-                        if keyPassphrase.isEmpty {
-                            storedProfile = try profileStore.clearKeyPassphrase(for: storedProfile)
-                        } else {
-                            storedProfile = try profileStore.saveKeyPassphrase(keyPassphrase, for: storedProfile)
-                        }
+                        profileStore.add(updated)
+                        selectedProfileId = updated.id
                     }
-                } catch {
-                    jobRunner.errorBanner = "Failed to save credentials: \(error.localizedDescription)"
+                    do {
+                        var storedProfile = updated
+                        if updated.authType == .password {
+                            storedProfile = try profileStore.clearKeyPassphrase(for: storedProfile)
+                            if password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                storedProfile = try profileStore.clearPassword(for: storedProfile)
+                            } else {
+                                storedProfile = try profileStore.savePassword(password, for: storedProfile)
+                            }
+                        } else {
+                            storedProfile = try profileStore.clearPassword(for: storedProfile)
+                            if keyPassphrase.isEmpty {
+                                storedProfile = try profileStore.clearKeyPassphrase(for: storedProfile)
+                            } else {
+                                storedProfile = try profileStore.saveKeyPassphrase(keyPassphrase, for: storedProfile)
+                            }
+                        }
+                    } catch {
+                        jobRunner.blockingError = "Failed to save credentials: \(error.localizedDescription)"
+                    }
                 }
             }
+    }
+
+    private var workspacePresentationLayer: some View {
+        workspaceLifecycleLayer
+            .frame(minWidth: minimumWindowWidth, minHeight: 600)
+            .background(Self.editorBackground)
+            .focusedSceneValue(\.showProfilesDrawerBinding, profilesDrawerSceneBinding)
+            .focusedSceneValue(\.showOperationsDrawerBinding, operationsDrawerSceneBinding)
+            .focusedSceneValue(\.windowCommandActions, windowCommandActions)
+    }
+
+    private var workspaceLifecycleLayer: some View {
+        workspaceContainer
+            .onAppear {
+                splitViewVisibility = showProfilesDrawer ? .all : .detailOnly
+                showOperationsDrawer = true
+                ingestExternalFiles()
+                seedRuntimeAnchorForActiveJob(force: true)
+                if selectedProfileId == nil {
+                    selectedProfileId = profileStore.profiles.first?.id
+                }
+                if profileStore.isEmpty {
+                    presentNewProfileEditor()
+                }
+            }
+            .onChange(of: splitViewVisibility) { _, visibility in
+                setProfilesDrawerVisible(
+                    WorkspaceLayoutState.profilesDrawerVisible(for: visibility),
+                    syncSplitVisibility: false
+                )
+            }
+            .onChange(of: externalFileIntake.sequence) { _, _ in
+                ingestExternalFiles()
+            }
+            .onChange(of: jobRunner.isRunning) { _, running in
+                if running {
+                    seedRuntimeAnchorForActiveJob(force: true)
+                }
+            }
+            .onChange(of: jobRunner.currentJob?.id) { _, _ in
+                seedRuntimeAnchorForActiveJob(force: true)
+            }
+            .onChange(of: jobRunner.currentJob?.step) { _, step in
+                guard step == .preflight else { return }
+                seedRuntimeAnchorForActiveJob(force: true)
+            }
+            .onChange(of: profileStore.profiles.map(\.id)) { _, ids in
+                if let selectedProfileId, !ids.contains(selectedProfileId) {
+                    self.selectedProfileId = ids.first
+                } else if self.selectedProfileId == nil {
+                    self.selectedProfileId = ids.first
+                }
+            }
+            .onOpenURL { url in
+                addFiles([url])
+            }
+    }
+
+    private var workspaceContainer: some View {
+        HStack(spacing: 0) {
+            NavigationSplitView(columnVisibility: $splitViewVisibility) {
+                sidebar
+                    .navigationSplitViewColumnWidth(
+                        min: Self.profilesDrawerWidth,
+                        ideal: Self.profilesDrawerWidth,
+                        max: Self.profilesDrawerWidth
+                    )
+                    .background(drawerBackground)
+            } detail: {
+                middleWorkbench
+                    .frame(minWidth: Self.workbenchMinWidth, maxWidth: .infinity)
+                    .background(Self.editorBackground)
+                    .toolbar {
+                        middleToolbarItems()
+                    }
+            }
+            .toolbarRole(.editor)
+            .navigationSplitViewStyle(.balanced)
+
+            if showOperationsDrawer {
+                operationsDrawer
+                    .frame(width: Self.operationsDrawerWidth)
+                    .background(drawerBackground)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        .animation(drawerTransitionAnimation, value: showOperationsDrawer)
     }
 
     // MARK: - Sidebar
@@ -553,8 +568,8 @@ struct ContentView: View {
             }
             .labelStyle(.iconOnly)
             .disabled(!(jobRunner.canRetryFailed && retryProfile != nil))
-            .help("Retry only previously failed files; successful files are skipped")
-            .accessibilityLabel("Retry only previously failed files; successful files are skipped")
+            .help("Retry failed or unfinished files; successful files are skipped")
+            .accessibilityLabel("Retry failed or unfinished files; successful files are skipped")
 
             Button {
                 jobRunner.cancel()
@@ -625,7 +640,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             OperationsTabsControl(
                 selection: $operationsTab,
-                tabs: Array(OperationsTab.allCases)
+                tabs: Array(WorkspaceOperationsTab.allCases)
             )
             .frame(maxWidth: .infinity)
             .frame(height: 36)
@@ -652,25 +667,57 @@ struct ContentView: View {
     }
 
     private var operationsProgressPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Active Job")
-                    .font(Self.sectionHeaderFont)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
+        VStack(spacing: 0) {
+            operationsPanelHeader("ACTIVE JOB")
 
-            if let job = jobRunner.currentJob {
-                jobStatusHeader(job: job)
-            } else {
-                Text("No job selected")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 8) {
+                if let job = jobRunner.currentJob {
+                    jobStatusHeader(job: job)
+                } else {
+                    Text("No job selected")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                if let message = operationsInlineMessage {
+                    inlineMessageRow(message: message)
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
         .background(drawerBackground)
+    }
+
+    private var operationsInlineMessage: String? {
+        if let message = jobRunner.inlineStatusMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !message.isEmpty
+        {
+            return message
+        }
+
+        guard let currentJob = jobRunner.currentJob else { return nil }
+        guard currentJob.step == .failed || currentJob.step == .cancelled else { return nil }
+        return currentJob.errorMessage
+    }
+
+    private func inlineMessageRow(message: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.caption)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.orange.opacity(0.08))
+        )
     }
 
     private var selectedProfileJobs: [Job] {
@@ -682,22 +729,19 @@ struct ContentView: View {
 
     private var jobHistoryView: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("RECENT JOBS")
-                    .font(Self.sectionHeaderFont)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Clear") {
+            operationsPanelHeader("RECENT JOBS") {
+                Button {
                     clearJobHistory()
+                } label: {
+                    Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .controlSize(.small)
+                .help("Clear job history")
+                .accessibilityLabel("Clear Job History")
                 .disabled(!canClearJobHistory)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(drawerBackground)
 
             List {
                 if selectedProfileJobs.isEmpty {
@@ -809,15 +853,23 @@ struct ContentView: View {
     }
 
     private var canClearFiles: Bool {
-        !jobRunner.isRunning && (!droppedFileItems.isEmpty || jobRunner.currentJob != nil)
+        WorkspaceCommandState.canClearFiles(
+            isRunning: jobRunner.isRunning,
+            queuedCount: droppedFileItems.count,
+            hasCurrentJob: jobRunner.currentJob != nil
+        )
     }
 
     private var canStartAction: Bool {
-        !jobRunner.isRunning && selectedProfile != nil && !droppedFileItems.isEmpty
+        WorkspaceCommandState.canStartUpload(
+            isRunning: jobRunner.isRunning,
+            hasSelectedProfile: selectedProfile != nil,
+            queuedCount: droppedFileItems.count
+        )
     }
 
     private var canStopAction: Bool {
-        jobRunner.isRunning
+        WorkspaceCommandState.canStopUpload(isRunning: jobRunner.isRunning)
     }
 
     private var canResetAction: Bool {
@@ -825,12 +877,22 @@ struct ContentView: View {
     }
 
     private var canDeleteSelectedFilesAction: Bool {
-        guard !jobRunner.isRunning, !selectedFileRowIDs.isEmpty else { return false }
-        return filesForDisplay().contains { selectedFileRowIDs.contains($0.id) && $0.source == .queued }
+        let hasQueuedSelection = filesForDisplay().contains {
+            selectedFileRowIDs.contains($0.id) && $0.source == .queued
+        }
+        return WorkspaceCommandState.canDeleteSelectedFiles(
+            isRunning: jobRunner.isRunning,
+            selectedCount: selectedFileRowIDs.count,
+            hasQueuedSelection: hasQueuedSelection
+        )
     }
 
     private var canUseCurrentJobAction: Bool {
         jobRunner.currentJob != nil
+    }
+
+    private var canCopyVisibleLogAction: Bool {
+        !jobRunner.logLines.isEmpty
     }
 
     private var windowCommandActions: WindowCommandActions {
@@ -857,6 +919,7 @@ struct ContentView: View {
             startUpload: startQueuedUpload,
             clearJobHistory: clearJobHistory,
             openLog: openLogs,
+            copyVisibleLog: copyVisibleLog,
             copyReport: copyReport,
             exportJSONReport: {
                 exportReport(as: .json)
@@ -885,6 +948,7 @@ struct ContentView: View {
             canStartUpload: canStartAction,
             canClearJobHistory: canClearJobHistory,
             canOpenLog: canUseCurrentJobAction,
+            canCopyVisibleLog: canCopyVisibleLogAction,
             canCopyReport: canUseCurrentJobAction,
             canExportJSONReport: canUseCurrentJobAction,
             canExportCSVReport: canUseCurrentJobAction
@@ -902,7 +966,7 @@ struct ContentView: View {
 
     private func fileRow(for file: DisplayFile, job: Job?) -> some View {
         let item = file.item
-        let progressState = progressState(for: file, in: job)
+        let rowStatus = fileRowStatus(for: file, in: job)
 
         return HStack(spacing: 8) {
             FileThumbnailIcon(url: item.localURL, size: 20)
@@ -913,31 +977,31 @@ struct ContentView: View {
             Text(Self.byteFormatter.string(fromByteCount: item.sizeBytes))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
-            perItemIndicator(for: file, state: progressState, in: job)
-            Text(progressLabel(for: progressState).uppercased())
+            perItemIndicator(for: file, rowStatus: rowStatus, in: job)
+            Text(rowStatusLabel(rowStatus).uppercased())
                 .font(.caption2.monospaced())
-                .foregroundStyle(progressColor(for: progressState))
-                .frame(width: 74, alignment: .trailing)
+                .foregroundStyle(rowStatusColor(rowStatus))
+                .frame(width: 108, alignment: .trailing)
         }
         .help(helpText(for: file))
         .contentShape(Rectangle())
     }
 
-    private func perItemIndicator(for file: DisplayFile, state: FileProgressState, in job: Job?) -> some View {
+    private func perItemIndicator(for file: DisplayFile, rowStatus: FileRowStatus, in job: Job?) -> some View {
         Group {
-            switch state {
+            switch rowStatus {
             case .failed:
                 Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-            case .imported:
-                successStatusDot()
-            case .processed:
+            case .regenerated:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-            case .uploading, .processing:
+            case .uploading, .verifying, .importing, .regenerating:
                 if isActivelyRunning(file, in: job) {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: "clock").foregroundStyle(.secondary)
                 }
+            case .uploaded, .verified, .imported:
+                statusDot(for: file.item.status)
             case .queued:
                 statusDot(for: .queued)
             }
@@ -950,56 +1014,64 @@ struct ContentView: View {
         return job.activeFileId == file.item.id
     }
 
-    private func progressState(for file: DisplayFile, in job: Job?) -> FileProgressState {
+    private func fileRowStatus(for file: DisplayFile, in job: Job?) -> FileRowStatus {
         if file.source == .queued {
             return .queued
         }
 
         let status = file.item.status
-        if status == .failed {
-            return .failed
-        }
-        if status == .regenerated {
-            return .processed
-        }
-
-        if isActivelyRunning(file, in: job) {
-            if job?.step == .uploading {
+        if isActivelyRunning(file, in: job), let step = job?.step {
+            switch step {
+            case .uploading:
                 return .uploading
+            case .verifying:
+                return .verifying
+            case .importing:
+                return .importing
+            case .regenerating:
+                return .regenerating
+            default:
+                break
             }
-            return .processing
         }
 
         switch status {
         case .queued:
             return .queued
-        case .uploaded, .verified:
-            return .processing
+        case .uploaded:
+            return .uploaded
+        case .verified:
+            return .verified
         case .imported:
             return .imported
         case .regenerated:
-            return .processed
+            return .regenerated
         case .failed:
             return .failed
         }
     }
 
-    private func progressLabel(for state: FileProgressState) -> String {
-        switch state {
+    private func rowStatusLabel(_ status: FileRowStatus) -> String {
+        switch status {
         case .queued: return "queued"
         case .uploading: return "uploading"
-        case .processing: return "processing"
+        case .uploaded: return "uploaded"
+        case .verifying: return "verifying"
+        case .verified: return "verified"
+        case .importing: return "importing"
         case .imported: return "imported"
-        case .processed: return "processed"
+        case .regenerating: return "regenerating"
+        case .regenerated: return "regenerated"
         case .failed: return "failed"
         }
     }
 
-    private func progressColor(for state: FileProgressState) -> Color {
-        switch state {
+    private func rowStatusColor(_ status: FileRowStatus) -> Color {
+        switch status {
         case .failed: return .red
-        case .imported, .processed: return .green
-        case .uploading, .processing: return .blue
+        case .regenerated: return .green
+        case .uploading, .uploaded, .verifying, .verified, .importing, .imported, .regenerating:
+            return .blue
         case .queued: return .secondary
         }
     }
@@ -1043,7 +1115,21 @@ struct ContentView: View {
 
 
     private func jobStatusHeader(job: Job) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let totalFiles = job.localFiles.count
+        let processedFiles = processedFileCount(for: job)
+        let successfulFiles = successfulFileCount(for: job)
+        let failedFiles = job.failedCount
+        let remainingFiles = max(totalFiles - processedFiles, 0)
+        let queuedFiles = fileCount(in: job, status: .queued)
+        let uploadedFiles = fileCount(in: job, status: .uploaded)
+        let verifiedFiles = fileCount(in: job, status: .verified)
+        let importedFiles = fileCount(in: job, status: .imported)
+        let statusLine = statusLineText(for: job)
+        let etaLine = etaText(for: job) ?? "ETA: Estimating..."
+        let rateLine = throughputText(for: job) ?? "Rate: Estimating..."
+        let progressLabel = totalFiles > 0 ? "\(processedFiles)/\(totalFiles) processed" : "0/0 processed"
+
+        return VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Label(stepTitle(job.step), systemImage: stepIcon(job.step))
                     .font(.callout.weight(.semibold))
@@ -1055,26 +1141,54 @@ struct ContentView: View {
                 }
             }
 
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            Text(statusLine)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            HStack {
+                Text(progressLabel)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(etaLine)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            ProgressView(value: overallFileProgress(for: job))
+
+            HStack {
+                Text(rateLine)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
                 GridRow {
-                    Text("Upload")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    ProgressView(value: job.uploadProgress)
-                    Text("\(Int(job.uploadProgress * 100))%")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, alignment: .trailing)
+                    progressMetricLabel("Queued")
+                    progressMetricValue(queuedFiles)
+                    progressMetricLabel("Uploaded")
+                    progressMetricValue(uploadedFiles)
                 }
                 GridRow {
-                    Text("Import")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    ProgressView(value: job.importProgress)
-                    Text("\(Int(job.importProgress * 100))%")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, alignment: .trailing)
+                    progressMetricLabel("Verified")
+                    progressMetricValue(verifiedFiles)
+                    progressMetricLabel("Imported")
+                    progressMetricValue(importedFiles)
+                }
+                GridRow {
+                    progressMetricLabel("Succeeded")
+                    progressMetricValue(successfulFiles, color: .green)
+                    progressMetricLabel("Failed")
+                    progressMetricValue(failedFiles, color: failedFiles > 0 ? .red : .secondary)
+                }
+                GridRow {
+                    progressMetricLabel("Remaining")
+                    progressMetricValue(remainingFiles)
+                    EmptyView()
+                    EmptyView()
                 }
             }
         }
@@ -1082,54 +1196,66 @@ struct ContentView: View {
 
     private var logViewer: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("TERMINAL")
-                    .font(Self.sectionHeaderFont)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            operationsPanelHeader("TERMINAL") {
                 Button {
                     openLogs()
                 } label: {
-                    Text("View Log")
+                    Image(systemName: "eye")
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .controlSize(.small)
                 .help("Open log file")
+                .accessibilityLabel("View Log")
                 .disabled(jobRunner.currentJob == nil)
 
-                Button("Copy") {
+                Button {
+                    copyVisibleLog()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .controlSize(.small)
+                .help("Copy visible terminal lines")
+                .accessibilityLabel("Copy Terminal")
+                .disabled(!canCopyVisibleLogAction)
+
+                Button {
                     copyReport()
+                } label: {
+                    Image(systemName: "doc.text")
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .controlSize(.small)
                 .help("Copy report")
+                .accessibilityLabel("Copy Report")
                 .disabled(jobRunner.currentJob == nil)
 
-                Menu("Export") {
+                Menu {
                     Button("Export JSON…") {
                         exportReport(as: .json)
                     }
                     Button("Export CSV…") {
                         exportReport(as: .csv)
                     }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
                 }
                 .menuStyle(.borderlessButton)
                 .font(.caption)
                 .controlSize(.small)
                 .help("Export report")
+                .accessibilityLabel("Export")
                 .disabled(jobRunner.currentJob == nil)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(drawerBackground)
 
             let bottomID = "log-bottom"
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(jobRunner.logLines.suffix(300).enumerated()), id: \.offset) { _, line in
+                        ForEach(Array(jobRunner.logLines.suffix(Self.visibleLogLineLimit).enumerated()), id: \.offset) { _, line in
                             Text(line)
                                 .font(.system(size: 10, design: .monospaced))
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1163,6 +1289,30 @@ struct ContentView: View {
         }
     }
 
+    private func operationsPanelHeader(_ title: String) -> some View {
+        operationsPanelHeader(title) {
+            EmptyView()
+        }
+    }
+
+    private func operationsPanelHeader<Actions: View>(
+        _ title: String,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(Self.sectionHeaderFont)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 8)
+            actions()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(drawerBackground)
+    }
+
     private func paneHeaderButton(
         systemImage: String,
         help: String,
@@ -1188,29 +1338,16 @@ struct ContentView: View {
 
     // MARK: - Helpers
 
-    private func isSidebarVisible(for visibility: NavigationSplitViewVisibility) -> Bool {
-        switch visibility {
-        case .detailOnly:
-            return false
-        default:
-            return true
-        }
-    }
-
-    private func splitVisibility(forProfilesDrawer isVisible: Bool) -> NavigationSplitViewVisibility {
-        isVisible ? .all : .detailOnly
-    }
-
     private func setProfilesDrawerVisible(_ isVisible: Bool, syncSplitVisibility: Bool = true) {
+        let targetVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: isVisible)
         let shouldToggleDrawer = showProfilesDrawer != isVisible
-        let targetSplitVisibility = splitVisibility(forProfilesDrawer: isVisible)
-        let shouldSyncSplitVisibility = syncSplitVisibility && splitViewVisibility != targetSplitVisibility
+        let shouldSyncSplitVisibility = syncSplitVisibility && splitViewVisibility != targetVisibility
         guard shouldToggleDrawer || shouldSyncSplitVisibility else { return }
 
         withAnimation(drawerTransitionAnimation) {
             showProfilesDrawer = isVisible
             if shouldSyncSplitVisibility {
-                splitViewVisibility = targetSplitVisibility
+                splitViewVisibility = targetVisibility
             }
         }
     }
@@ -1223,6 +1360,7 @@ struct ContentView: View {
         }
     }
 
+
     private var retryProfile: ServerProfile? {
         guard let job = jobRunner.currentJob else { return nil }
         return profileStore.profiles.first(where: { $0.id == job.profileId })
@@ -1233,7 +1371,10 @@ struct ContentView: View {
     }
 
     private var canClearJobHistory: Bool {
-        !jobRunner.isRunning && !jobStore.jobs.isEmpty
+        WorkspaceCommandState.canClearJobHistory(
+            isRunning: jobRunner.isRunning,
+            jobCount: jobStore.jobs.count
+        )
     }
 
     private func presentNewProfileEditor() {
@@ -1268,7 +1409,7 @@ struct ContentView: View {
     private func choosePhotos() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.allowedContentTypes = {
             let extensions = ["jpg", "jpeg", "jpe", "gif", "png", "bmp", "ico", "webp", "avif", "heic", "pdf"]
@@ -1373,6 +1514,15 @@ struct ContentView: View {
         pasteboard.setString(text, forType: .string)
     }
 
+    private func copyVisibleLog() {
+        let text = jobRunner.logLines
+            .suffix(Self.visibleLogLineLimit)
+            .joined(separator: "\n")
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
     @MainActor
     private func exportReport(as format: ReportExportFormat) {
         guard let payload = jobRunner.reportPayload(format: format) else { return }
@@ -1387,7 +1537,7 @@ struct ContentView: View {
         do {
             try payload.write(to: destination, atomically: true, encoding: String.Encoding.utf8)
         } catch {
-            jobRunner.errorBanner = "Failed to export: \(error.localizedDescription)"
+            jobRunner.blockingError = "Failed to export: \(error.localizedDescription)"
         }
     }
 
@@ -1416,12 +1566,6 @@ struct ContentView: View {
     private func statusDot(for status: FileItemStatus) -> some View {
         Circle()
             .fill(statusColor(status))
-            .frame(width: 8, height: 8)
-    }
-
-    private func successStatusDot() -> some View {
-        Circle()
-            .fill(Color.green)
             .frame(width: 8, height: 8)
     }
 
@@ -1456,10 +1600,132 @@ struct ContentView: View {
         step.rawValue.capitalized
     }
 
+    private func processedFileCount(for job: Job) -> Int {
+        job.localFiles.filter { item in
+            item.status == .regenerated || item.status == .failed
+        }.count
+    }
+
+    private func successfulFileCount(for job: Job) -> Int {
+        job.localFiles.filter { $0.status == .regenerated }.count
+    }
+
+    private func overallFileProgress(for job: Job) -> Double {
+        let total = job.localFiles.count
+        guard total > 0 else { return 0 }
+        return Double(processedFileCount(for: job)) / Double(total)
+    }
+
+    private func fileCount(in job: Job, status: FileItemStatus) -> Int {
+        job.localFiles.filter { $0.status == status }.count
+    }
+
+    private func statusLineText(for job: Job) -> String {
+        let total = job.localFiles.count
+        guard total > 0 else { return "No files queued." }
+
+        if job.step == .preflight {
+            return "Running preflight checks and preparing staging."
+        }
+
+        if let activeFileId = job.activeFileId,
+           let index = job.localFiles.firstIndex(where: { $0.id == activeFileId })
+        {
+            let activeFile = job.localFiles[index]
+            let displayFile = DisplayFile(source: .currentJob, item: activeFile)
+            let status = fileRowStatus(for: displayFile, in: job)
+            return "File \(index + 1) of \(total): \(activeFile.filename) • \(rowStatusLabel(status).capitalized)"
+        }
+
+        if job.step.isTerminal {
+            return "\(processedFileCount(for: job))/\(total) files processed."
+        }
+
+        if let nextIndex = job.localFiles.firstIndex(where: { file in
+            file.status == .queued || file.status == .uploaded || file.status == .verified || file.status == .imported
+        }) {
+            return "Next file \(nextIndex + 1) of \(total): \(job.localFiles[nextIndex].filename)"
+        }
+
+        return "\(processedFileCount(for: job))/\(total) files processed."
+    }
+
+    private func seedRuntimeAnchorForActiveJob(force: Bool = false) {
+        guard let job = jobRunner.currentJob else { return }
+        guard !job.step.isTerminal else { return }
+        if !force, runtimeAnchors[job.id] != nil { return }
+        runtimeAnchors[job.id] = RuntimeAnchor(
+            startedAt: Date(),
+            processedBaseline: processedFileCount(for: job)
+        )
+    }
+
+    private func runtimeEstimate(for job: Job) -> RuntimeEstimate? {
+        guard let anchor = runtimeAnchors[job.id] else { return nil }
+
+        let elapsed = Date().timeIntervalSince(anchor.startedAt)
+        guard elapsed > 5 else { return nil }
+
+        let completedSinceStart = processedFileCount(for: job) - anchor.processedBaseline
+        guard completedSinceStart > 0 else { return nil }
+
+        let filesPerSecond = Double(completedSinceStart) / elapsed
+        guard filesPerSecond > 0 else { return nil }
+
+        let remaining = max(job.localFiles.count - processedFileCount(for: job), 0)
+        let secondsRemaining = Double(remaining) / filesPerSecond
+        return RuntimeEstimate(
+            filesPerMinute: filesPerSecond * 60,
+            secondsRemaining: max(secondsRemaining, 0)
+        )
+    }
+
+    private func etaText(for job: Job) -> String? {
+        if job.step.isTerminal {
+            return "ETA: Complete"
+        }
+
+        guard let estimate = runtimeEstimate(for: job) else { return nil }
+        if estimate.secondsRemaining < 60 {
+            return "ETA: <1 min"
+        }
+
+        return "ETA: \(Self.durationFormatter.string(from: estimate.secondsRemaining) ?? "Estimating...")"
+    }
+
+    private func throughputText(for job: Job) -> String? {
+        if let estimate = runtimeEstimate(for: job) {
+            return String(format: "Rate: %.1f files/min", estimate.filesPerMinute)
+        }
+        return job.step.isTerminal ? "Rate: n/a" : nil
+    }
+
+    private func progressMetricLabel(_ label: String) -> some View {
+        Text(label)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+    }
+
+    private func progressMetricValue(_ value: Int, color: Color = .primary) -> some View {
+        Text("\(value)")
+            .font(.caption2.monospacedDigit().weight(.semibold))
+            .foregroundStyle(color)
+            .frame(minWidth: 24, alignment: .trailing)
+    }
+
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB]
         formatter.countStyle = .file
+        return formatter
+    }()
+
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute]
+        formatter.unitsStyle = .abbreviated
+        formatter.maximumUnitCount = 2
+        formatter.zeroFormattingBehavior = .dropAll
         return formatter
     }()
 }

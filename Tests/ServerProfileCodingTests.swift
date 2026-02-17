@@ -2,7 +2,7 @@ import XCTest
 @testable import WordpressMediaUploaderApp
 
 final class ServerProfileCodingTests: XCTestCase {
-    func testDecodingLegacyProfileWithoutSoundSettingDefaultsToFalse() throws {
+    func testDecodingLegacyProfileWithoutDeprecatedSoundSettingStillSucceeds() throws {
         let id = UUID()
         let json = """
         {
@@ -19,16 +19,32 @@ final class ServerProfileCodingTests: XCTestCase {
         """
 
         let decoded = try JSONDecoder().decode(ServerProfile.self, from: Data(json.utf8))
-        XCTAssertFalse(decoded.playCompletionSoundOnCompletion)
+        XCTAssertEqual(decoded.id, id)
+        XCTAssertFalse(decoded.keepRemoteFiles)
     }
 
-    func testEncodeDecodeRoundTripPreservesSoundSetting() throws {
-        var profile = ServerProfile.default
-        profile.name = "With sound"
-        profile.playCompletionSoundOnCompletion = true
+    func testDecodingLegacyProfileWithDeprecatedSoundSettingIgnoresField() throws {
+        let id = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "name": "With sound",
+          "host": "example.com",
+          "port": 22,
+          "username": "deploy",
+          "authType": "password",
+          "wpRootPath": "/var/www/html",
+          "remoteStagingRoot": "~/wp-media-import",
+          "keepRemoteFiles": false,
+          "playCompletionSoundOnCompletion": true
+        }
+        """
 
-        let data = try JSONEncoder().encode(profile)
-        let decoded = try JSONDecoder().decode(ServerProfile.self, from: data)
-        XCTAssertTrue(decoded.playCompletionSoundOnCompletion)
+        let decoded = try JSONDecoder().decode(ServerProfile.self, from: Data(json.utf8))
+        let encoded = try JSONEncoder().encode(decoded)
+        let encodedString = String(decoding: encoded, as: UTF8.self)
+
+        XCTAssertEqual(decoded.name, "With sound")
+        XCTAssertFalse(encodedString.contains("playCompletionSoundOnCompletion"))
     }
 }

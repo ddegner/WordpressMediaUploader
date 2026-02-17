@@ -32,6 +32,9 @@ targets:
         MARKETING_VERSION: "0.9"
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Sources/WordpressImageUploaderApp/WPMediaUploader.entitlements
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        ENABLE_USER_SELECTED_FILES: readonly
   WordpressMediaUploaderAppTests:
     type: bundle.unit-test
     platform: macOS

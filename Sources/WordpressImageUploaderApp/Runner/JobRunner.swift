@@ -1,12 +1,14 @@
 import AppKit
 import Foundation
 import Observation
+import UserNotifications
 
 enum JobRunnerError: LocalizedError {
     case missingFiles
     case unsupportedImages
     case profileIncomplete(String)
     case authSetupFailed(String)
+    case invalidStepTransition(from: JobStep, to: JobStep)
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +20,8 @@ enum JobRunnerError: LocalizedError {
             return "Profile is incomplete: \(detail)"
         case let .authSetupFailed(detail):
             return "Failed to configure SSH authentication: \(detail)"
+        case let .invalidStepTransition(from, to):
+            return "Invalid job step transition: \(from.rawValue) -> \(to.rawValue)"
         }
     }
 }
@@ -26,6 +30,7 @@ enum JobRunnerError: LocalizedError {
 @Observable
 final class JobRunner {
     static let playCompletionSoundDefaultsKey = "playCompletionSoundOnCompletion"
+    static let showCompletionNotificationDefaultsKey = "showCompletionNotificationOnCompletion"
 
     private actor ConnectionTestTimeoutState {
         private(set) var triggered = false
@@ -36,11 +41,13 @@ final class JobRunner {
     }
 
     private static let connectionTestTimeoutSeconds: UInt64 = 45
+    private static let longCommandHeartbeatSeconds: UInt64 = 20
 
     var currentJob: Job?
     var logLines: [String] = []
     var isRunning = false
-    var errorBanner: String?
+    var blockingError: String?
+    var inlineStatusMessage: String?
 
     private let profileStore: ProfileStore
     private let jobStore: JobStore
@@ -49,6 +56,15 @@ final class JobRunner {
     private var activeTask: Task<Void, Never>?
     private var activeRunJobID: UUID?
     private var isCancelling = false
+
+    static func requestCompletionNotificationAuthorizationIfNeeded() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in
+                // No-op: callers handle notification delivery opportunistically.
+            }
+        }
+    }
 
     init(profileStore: ProfileStore, jobStore: JobStore) {
         self.profileStore = profileStore
@@ -61,11 +77,17 @@ final class JobRunner {
 
     var canRetryFailed: Bool {
         guard !isRunning, let job = currentJob else { return false }
+
+        if job.step == .failed || job.step == .cancelled {
+            return job.localFiles.contains { isRetryableStatus($0.status) }
+        }
+
         return job.localFiles.contains { $0.status == .failed }
     }
 
     func start(profile: ServerProfile, fileURLs: [URL]) {
         guard !isRunning else { return }
+        inlineStatusMessage = nil
 
         do {
             let fileItems = try prepareFileItems(urls: fileURLs)
@@ -80,12 +102,13 @@ final class JobRunner {
 
             currentJob = job
             logLines = []
-            errorBanner = nil
+            presentBlockingError(nil)
+            inlineStatusMessage = nil
             jobStore.upsert(job)
 
             runPipeline(profile: profile, jobID: job.id)
         } catch {
-            errorBanner = error.localizedDescription
+            presentBlockingError(error.localizedDescription)
         }
     }
 
@@ -94,46 +117,33 @@ final class JobRunner {
         guard let selectedJob = currentJob else { return }
 
         guard selectedJob.profileId == profile.id else {
-            errorBanner = "The selected profile does not match the job's original profile."
+            presentInlineStatusMessage("The selected profile does not match the job's original profile.")
             return
         }
 
-        mutateJob(id: selectedJob.id) { job in
-            for idx in job.localFiles.indices {
-                guard job.localFiles[idx].status == .failed else { continue }
+        do {
+            try transitionJobStep(jobID: selectedJob.id, to: .preflight) { job in
+                for idx in job.localFiles.indices {
+                    guard job.localFiles[idx].status == .failed else { continue }
 
-                if job.localFiles[idx].importAttachmentId != nil {
-                    job.localFiles[idx].status = .imported
-                } else {
-                    job.localFiles[idx].status = .queued
-                    job.localFiles[idx].remotePath = nil
+                    if job.localFiles[idx].importAttachmentId != nil {
+                        job.localFiles[idx].status = .imported
+                    } else {
+                        job.localFiles[idx].status = .queued
+                        job.localFiles[idx].remotePath = nil
+                    }
+                    job.localFiles[idx].errorMessage = nil
                 }
-                job.localFiles[idx].errorMessage = nil
-            }
 
-            job.step = .preflight
-            job.errorMessage = nil
-            // job.uploadProgress = 0
-            // job.importProgress = 0
-            // Calculate progress based on existing files that don't need work
-            let total = Double(job.localFiles.count)
-            if total > 0 {
-                let uploadedCount = job.localFiles.filter {
-                    [.uploaded, .verified, .imported, .regenerated].contains($0.status)
-                }.count
-                job.uploadProgress = Double(uploadedCount) / total
-
-                let importedCount = job.localFiles.filter {
-                    [.imported, .regenerated].contains($0.status)
-                }.count
-                job.importProgress = Double(importedCount) / total
-            } else {
-                job.uploadProgress = 0
-                job.importProgress = 0
+                job.errorMessage = nil
+                job.activeFileId = nil
             }
-            job.activeFileId = nil
+        } catch {
+            presentInlineStatusMessage(error.localizedDescription)
+            return
         }
 
+        recalculateProgress(jobID: selectedJob.id)
         runPipeline(profile: profile, jobID: selectedJob.id)
     }
 
@@ -142,10 +152,15 @@ final class JobRunner {
 
         isCancelling = true
         if let activeRunJobID {
-            mutateJob(id: activeRunJobID) { job in
-                job.step = .cancelled
-                job.errorMessage = "Cancellation requested"
-                job.activeFileId = nil
+            do {
+                try transitionJobStep(jobID: activeRunJobID, to: .cancelled) { job in
+                    job.errorMessage = "Cancellation requested"
+                    job.activeFileId = nil
+                }
+            } catch JobRunnerError.invalidStepTransition {
+                // The run reached a terminal state before cancellation could be applied.
+            } catch {
+                presentInlineStatusMessage(error.localizedDescription)
             }
         }
 
@@ -187,12 +202,13 @@ final class JobRunner {
 
     func loadJob(_ job: Job) {
         if isRunning {
-            errorBanner = "Cannot switch jobs while a run is active."
+            presentInlineStatusMessage("Cannot switch jobs while a run is active.")
             return
         }
 
         currentJob = job
-        errorBanner = nil
+        presentBlockingError(nil)
+        inlineStatusMessage = nil
         logLines = readLogLines(atPath: job.logsPath)
     }
 
@@ -201,10 +217,18 @@ final class JobRunner {
         jobStore.clear()
         currentJob = nil
         logLines = []
-        errorBanner = nil
+        presentBlockingError(nil)
+        inlineStatusMessage = nil
     }
 
     func testConnection(profile: ServerProfile, password: String?, keyPassphrase: String?) async -> ProfileTestResult {
+        guard !isRunning else {
+            return ProfileTestResult(
+                checks: ["Stop the active upload before running Test Connection."],
+                success: false
+            )
+        }
+
         var checks: [String] = []
         var authContext: SSHAuthContext?
         let timeoutState = ConnectionTestTimeoutState()
@@ -255,7 +279,8 @@ final class JobRunner {
         activeRunJobID = jobID
         isRunning = true
         isCancelling = false
-        errorBanner = nil
+        presentBlockingError(nil)
+        inlineStatusMessage = nil
 
         activeTask = Task { [weak self] in
             guard let self else { return }
@@ -268,7 +293,7 @@ final class JobRunner {
             }
 
             guard let job = self.jobSnapshot(id: jobID) else {
-                self.errorBanner = "The selected job no longer exists."
+                self.presentBlockingError("The selected job no longer exists.")
                 return
             }
 
@@ -307,20 +332,14 @@ final class JobRunner {
                 try await self.ensureRemoteJobDirectories(profile: profile, auth: auth, writer: writer, jobID: jobID)
 
                 try Task.checkCancellation()
-                try await self.uploadAndVerify(profile: profile, auth: auth, writer: writer, jobID: jobID)
-
-                try Task.checkCancellation()
-                try await self.importVerifiedFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
-
-                try Task.checkCancellation()
-                try await self.regenerateImported(profile: profile, auth: auth, writer: writer, jobID: jobID)
+                try await self.processFilesSequentially(profile: profile, auth: auth, writer: writer, jobID: jobID)
 
                 try Task.checkCancellation()
                 if !profile.keepRemoteFiles {
                     try await self.cleanupRemoteFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
                 }
 
-                self.finishJob(jobID: jobID, profile: profile)
+                try self.finishJob(jobID: jobID)
             } catch is CancellationError {
                 self.markJobCancelled(jobID: jobID, writer: writer)
             } catch {
@@ -328,57 +347,67 @@ final class JobRunner {
                     self.markJobCancelled(jobID: jobID, writer: writer)
                 } else {
                     self.appendLog("Job failed: \(error.localizedDescription)", writer: writer)
-                    self.mutateJob(id: jobID) { mutable in
-                        mutable.step = .failed
-                        mutable.errorMessage = error.localizedDescription
-                        mutable.activeFileId = nil
+                    do {
+                        try self.transitionJobStep(jobID: jobID, to: .failed, writer: writer) { mutable in
+                            mutable.errorMessage = error.localizedDescription
+                            mutable.activeFileId = nil
+                        }
+                    } catch {
+                        self.appendLog(error.localizedDescription, writer: writer)
                     }
-                    self.errorBanner = error.localizedDescription
-                    self.playCompletionSoundIfEnabled(success: false, profile: profile)
+                    self.presentBlockingError(error.localizedDescription)
+                    self.notifyCompletionIfEnabled(success: false, jobID: jobID)
                 }
             }
         }
     }
 
-    private func finishJob(jobID: UUID, profile: ServerProfile) {
+    private func finishJob(jobID: UUID) throws {
         guard let job = jobSnapshot(id: jobID) else { return }
 
         if job.localFiles.contains(where: { $0.status == .failed }) {
-            mutateJob(id: jobID) { mutable in
-                mutable.step = .failed
+            try transitionJobStep(jobID: jobID, to: .failed) { mutable in
                 mutable.errorMessage =
                     "\(mutable.failedCount) file(s) failed. Use Retry Failed to rerun only failed steps."
                 mutable.activeFileId = nil
             }
-            errorBanner = jobSnapshot(id: jobID)?.errorMessage
-            playCompletionSoundIfEnabled(success: false, profile: profile)
+            presentInlineStatusMessage(jobSnapshot(id: jobID)?.errorMessage)
+            notifyCompletionIfEnabled(success: false, jobID: jobID)
         } else {
-            mutateJob(id: jobID) { mutable in
-                mutable.step = .finished
+            try transitionJobStep(jobID: jobID, to: .finished) { mutable in
                 mutable.errorMessage = nil
                 mutable.uploadProgress = 1
                 mutable.importProgress = 1
                 mutable.activeFileId = nil
             }
-            playCompletionSoundIfEnabled(success: true, profile: profile)
+            presentInlineStatusMessage(nil)
+            notifyCompletionIfEnabled(success: true, jobID: jobID)
         }
     }
 
     private func markJobCancelled(jobID: UUID, writer: LogWriter) {
         appendLog("Job cancelled.", writer: writer)
-        mutateJob(id: jobID) { mutable in
-            mutable.step = .cancelled
-            mutable.errorMessage = "Cancelled by user"
-            mutable.activeFileId = nil
+        var markedCancelled = false
+        do {
+            try transitionJobStep(jobID: jobID, to: .cancelled, writer: writer) { mutable in
+                mutable.errorMessage = "Cancelled by user"
+                mutable.activeFileId = nil
+            }
+            markedCancelled = true
+        } catch JobRunnerError.invalidStepTransition {
+            // Ignore races where the job already reached a terminal state.
+        } catch {
+            appendLog(error.localizedDescription, writer: writer)
         }
-        errorBanner = "Job cancelled."
+        if markedCancelled {
+            presentInlineStatusMessage("Job cancelled. Use Retry Failed to continue unfinished files.")
+        }
     }
 
     // MARK: - Pipeline steps
 
     private func preflight(profile: ServerProfile, auth: SSHAuthContext, writer: LogWriter, jobID: UUID) async throws {
-        mutateJob(id: jobID) {
-            $0.step = .preflight
+        try transitionJobStep(jobID: jobID, to: .preflight, writer: writer) {
             $0.activeFileId = nil
         }
 
@@ -419,7 +448,7 @@ final class JobRunner {
         )
     }
 
-    private func uploadAndVerify(
+    private func processFilesSequentially(
         profile: ServerProfile,
         auth: SSHAuthContext,
         writer: LogWriter,
@@ -428,249 +457,202 @@ final class JobRunner {
         try Task.checkCancellation()
         guard let job = jobSnapshot(id: jobID) else { return }
 
-        mutateJob(id: jobID) {
-            $0.step = .uploading
-            $0.uploadProgress = 0
-            $0.activeFileId = nil
-        }
+        let incomingDir = incomingDirectory(for: job)
+        let logger = lineLogger(writer: writer)
+        let orderedFileIDs = job.localFiles.map(\.id)
 
-        let candidates = job.localFiles.filter { $0.status == .queued }
-        if candidates.isEmpty {
-            mutateJob(id: jobID) {
-                $0.uploadProgress = 1
-            }
-        } else {
-            let incomingDir = incomingDirectory(for: job)
-            let logger = lineLogger(writer: writer)
+        recalculateProgress(jobID: jobID)
 
-            do {
-                let remoteDirs = candidates.map { shellSingleQuote("\(incomingDir)/\($0.id.uuidString)") }
-                let mkdirCmd = "mkdir -p \(remoteDirs.joined(separator: " "))"
-                _ = try await transport.runSSH(
-                    profile: profile,
-                    auth: auth,
-                    remoteCommand: mkdirCmd,
-                    writer: writer,
-                    onLine: logger
-                )
-
-                for (index, file) in candidates.enumerated() {
-                    try Task.checkCancellation()
-                    mutateJob(id: jobID) { mutable in
-                        mutable.activeFileId = file.id
-                    }
-                    do {
-                        let remotePath = remoteUploadPath(incomingDir: incomingDir, file: file)
-
-                        try await transport.runRsyncFile(
-                            profile: profile,
-                            auth: auth,
-                            localFileURL: file.localURL,
-                            remoteTargetPath: remoteUploadDirectory(incomingDir: incomingDir, file: file) + "/",
-                            writer: writer
-                        ) { [weak self] stream, line in
-                            Task { @MainActor in
-                                guard let self else { return }
-                                self.appendLog("[\(stream == .stdout ? "out" : "err")] \(line)", writer: writer)
-                                if stream == .stdout, let fileProgress = parseRsyncProgress(line) {
-                                    let total = Double(candidates.count)
-                                    let combined = (Double(index) + fileProgress) / total
-                                    self.mutateJob(id: jobID) { mutable in
-                                        mutable.uploadProgress = combined
-                                    }
-                                }
-                            }
-                        }
-
-                        mutateJob(id: jobID) { mutable in
-                            if let idx = mutable.localFiles.firstIndex(where: { $0.id == file.id }) {
-                                mutable.localFiles[idx].remotePath = remotePath
-                                mutable.localFiles[idx].status = .uploaded
-                                mutable.localFiles[idx].errorMessage = nil
-                            }
-                            mutable.uploadProgress = Double(index + 1) / Double(candidates.count)
-                        }
-                    } catch {
-                        if Task.isCancelled {
-                            throw CancellationError()
-                        }
-                        mutateJob(id: jobID) { mutable in
-                            if let idx = mutable.localFiles.firstIndex(where: { $0.id == file.id }) {
-                                mutable.localFiles[idx].status = .failed
-                                mutable.localFiles[idx].errorMessage = error.localizedDescription
-                                mutable.localFiles[idx].remotePath = nil
-                            }
-                            mutable.uploadProgress = Double(index + 1) / Double(candidates.count)
-                        }
-                    }
-                }
-            } catch {
-                if Task.isCancelled {
-                    throw CancellationError()
-                }
-                appendLog("Upload setup failed: \(error.localizedDescription)", writer: writer)
-                mutateJob(id: jobID) { mutable in
-                    for idx in mutable.localFiles.indices {
-                        guard candidates.contains(where: { $0.id == mutable.localFiles[idx].id }) else { continue }
-                        mutable.localFiles[idx].status = .failed
-                        mutable.localFiles[idx].errorMessage = error.localizedDescription
-                        mutable.localFiles[idx].remotePath = nil
-                    }
-                }
-            }
-        }
-
-        try Task.checkCancellation()
-        mutateJob(id: jobID) {
-            $0.step = .verifying
-            $0.activeFileId = nil
-        }
-
-        try await verifyUploadedFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
-    }
-
-    private func verifyUploadedFiles(
-        profile: ServerProfile,
-        auth: SSHAuthContext,
-        writer: LogWriter,
-        jobID: UUID
-    ) async throws {
-        try Task.checkCancellation()
-        guard let job = jobSnapshot(id: jobID) else { return }
-
-        let verifyTargets = job.localFiles.filter { $0.status == .uploaded }
-        if verifyTargets.isEmpty {
-            return
-        }
-
-        for file in verifyTargets {
+        for fileID in orderedFileIDs {
             try Task.checkCancellation()
+            guard let current = fileSnapshot(jobID: jobID, fileID: fileID) else { continue }
+            guard shouldProcessSequentially(current) else { continue }
+
             mutateJob(id: jobID) { mutable in
-                mutable.activeFileId = file.id
+                mutable.activeFileId = current.id
             }
-            do {
-                guard let remotePath = file.remotePath else {
-                    throw JobRunnerError.profileIncomplete("Missing remote path for \(file.filename)")
-                }
 
-                let remoteSize = try await transport.fetchRemoteFileSize(
-                    profile: profile,
-                    auth: auth,
-                    remotePath: remotePath,
-                    writer: writer,
-                    onLine: lineLogger(writer: writer)
-                )
+            if current.status == .queued {
+                try transitionJobStep(jobID: jobID, to: .uploading, writer: writer)
 
-                if remoteSize == file.sizeBytes {
-                    updateFile(jobID: jobID, id: file.id) {
-                        $0.status = .verified
-                        $0.errorMessage = nil
-                    }
-                } else {
-                    updateFile(jobID: jobID, id: file.id) {
-                        $0.status = .failed
-                        $0.errorMessage = "Size mismatch (local \(file.sizeBytes) bytes, remote \(remoteSize) bytes)"
-                    }
-                }
-            } catch {
-                if Task.isCancelled {
-                    throw CancellationError()
-                }
-                updateFile(jobID: jobID, id: file.id) {
-                    $0.status = .failed
-                    $0.errorMessage = error.localizedDescription
-                }
-            }
-        }
-
-        mutateJob(id: jobID) { mutable in
-            mutable.activeFileId = nil
-        }
-    }
-
-    private func importVerifiedFiles(
-        profile: ServerProfile,
-        auth: SSHAuthContext,
-        writer: LogWriter,
-        jobID: UUID
-    ) async throws {
-        try Task.checkCancellation()
-        guard let job = jobSnapshot(id: jobID) else { return }
-
-        mutateJob(id: jobID) {
-            $0.step = .importing
-            $0.importProgress = 0
-            $0.activeFileId = nil
-        }
-
-        let importTargets = job.localFiles.filter { $0.status == .verified }
-        if importTargets.isEmpty {
-            mutateJob(id: jobID) {
-                $0.importProgress = 1
-            }
-            return
-        }
-
-        for (index, file) in importTargets.enumerated() {
-            try Task.checkCancellation()
-            mutateJob(id: jobID) { mutable in
-                mutable.activeFileId = file.id
-            }
-            do {
-                guard let remotePath = file.remotePath else {
-                    throw JobRunnerError.profileIncomplete("Missing remote path for \(file.filename)")
-                }
-
-                appendLog("Importing file \(index + 1)/\(importTargets.count): \(file.filename)", writer: writer)
-
-                let wpPath = shellSingleQuote(profile.wpRootPath)
-                let remoteSQ = shellSingleQuote(remotePath)
-                let baseCommand = "wp --path=\(wpPath) media import \(remoteSQ) --porcelain"
-                let command = wrapWithOptionalTimeout(command: baseCommand, seconds: 600)
-                let result = try await transport.runSSH(
-                    profile: profile,
-                    auth: auth,
-                    remoteCommand: command,
-                    writer: writer,
-                    onLine: lineLogger(writer: writer)
-                )
-
-                let idLine = result.stdoutLines
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first { Int($0) != nil }
-
-                guard let idLine, let attachmentId = Int(idLine) else {
-                    throw JobRunnerError.profileIncomplete("Import did not return attachment ID for \(file.filename)")
-                }
-
-                appendLog("Imported \(file.filename) as attachment ID \(attachmentId).", writer: writer)
-                mutateJob(id: jobID) { mutable in
-                    if let idx = mutable.localFiles.firstIndex(where: { $0.id == file.id }) {
-                        mutable.localFiles[idx].status = .imported
-                        mutable.localFiles[idx].importAttachmentId = attachmentId
-                        mutable.localFiles[idx].errorMessage = nil
-                    }
-
-                    if !mutable.importedIds.contains(attachmentId) {
-                        mutable.importedIds.append(attachmentId)
-                    }
-                }
-                updateImportProgress(
-                    jobID: jobID,
-                    completedCount: index + 1,
-                    totalCount: importTargets.count
-                )
+                let totalFiles = max(totalFileCount(jobID: jobID), 1)
+                let uploadedBefore = uploadedCompletedCount(jobID: jobID, excluding: current.id)
 
                 do {
+                    let remoteDir = remoteUploadDirectory(incomingDir: incomingDir, file: current)
+                    let mkdirCmd = "mkdir -p \(shellSingleQuote(remoteDir))"
+                    _ = try await transport.runSSH(
+                        profile: profile,
+                        auth: auth,
+                        remoteCommand: mkdirCmd,
+                        writer: writer,
+                        onLine: logger
+                    )
+
+                    let remotePath = remoteUploadPath(incomingDir: incomingDir, file: current)
+                    try await transport.runRsyncFile(
+                        profile: profile,
+                        auth: auth,
+                        localFileURL: current.localURL,
+                        remoteTargetPath: remoteDir + "/",
+                        writer: writer
+                    ) { [weak self] stream, line in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            self.appendLog("[\(stream == .stdout ? "out" : "err")] \(line)", writer: writer)
+                            guard stream == .stdout, let fileProgress = parseRsyncProgress(line) else { return }
+                            let combined = (Double(uploadedBefore) + fileProgress) / Double(totalFiles)
+                            self.mutateJob(id: jobID) { mutable in
+                                mutable.uploadProgress = min(max(combined, 0), 1)
+                            }
+                        }
+                    }
+
+                    updateFile(jobID: jobID, id: current.id) {
+                        $0.remotePath = remotePath
+                        $0.status = .uploaded
+                        $0.errorMessage = nil
+                    }
+                } catch {
+                    if Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    let message = "Upload failed for \(current.filename): \(error.localizedDescription)"
+                    appendLog(message, writer: writer)
+                    updateFile(jobID: jobID, id: current.id) {
+                        $0.status = .failed
+                        $0.errorMessage = message
+                        $0.remotePath = nil
+                    }
+                }
+
+                recalculateProgress(jobID: jobID)
+            }
+
+            guard let afterUpload = fileSnapshot(jobID: jobID, fileID: fileID) else { continue }
+            if afterUpload.status == .uploaded {
+                try transitionJobStep(jobID: jobID, to: .verifying, writer: writer)
+
+                do {
+                    guard let remotePath = afterUpload.remotePath else {
+                        throw JobRunnerError.profileIncomplete("Missing remote path for \(afterUpload.filename)")
+                    }
+
+                    let remoteSize = try await transport.fetchRemoteFileSize(
+                        profile: profile,
+                        auth: auth,
+                        remotePath: remotePath,
+                        writer: writer,
+                        onLine: logger
+                    )
+
+                    if remoteSize == afterUpload.sizeBytes {
+                        updateFile(jobID: jobID, id: afterUpload.id) {
+                            $0.status = .verified
+                            $0.errorMessage = nil
+                        }
+                    } else {
+                        updateFile(jobID: jobID, id: afterUpload.id) {
+                            $0.status = .failed
+                            $0.errorMessage = "Size mismatch (local \(afterUpload.sizeBytes) bytes, remote \(remoteSize) bytes)"
+                        }
+                    }
+                } catch {
+                    if Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    updateFile(jobID: jobID, id: afterUpload.id) {
+                        $0.status = .failed
+                        $0.errorMessage = error.localizedDescription
+                    }
+                }
+
+                recalculateProgress(jobID: jobID)
+            }
+
+            guard let afterVerify = fileSnapshot(jobID: jobID, fileID: fileID) else { continue }
+            if afterVerify.status == .verified {
+                try transitionJobStep(jobID: jobID, to: .importing, writer: writer)
+
+                do {
+                    guard let remotePath = afterVerify.remotePath else {
+                        throw JobRunnerError.profileIncomplete("Missing remote path for \(afterVerify.filename)")
+                    }
+
+                    appendLog("Importing \(afterVerify.filename).", writer: writer)
+
+                    let wpPath = shellSingleQuote(profile.wpRootPath)
+                    let remoteSQ = shellSingleQuote(remotePath)
+                    let baseCommand = "wp --path=\(wpPath) media import \(remoteSQ) --porcelain"
+                    let command = wrapWithOptionalTimeout(command: baseCommand, seconds: 600)
+                    let heartbeat = startLongCommandHeartbeat(
+                        activity: "Importing \(afterVerify.filename)",
+                        writer: writer
+                    )
+                    defer { heartbeat.cancel() }
+
+                    let result = try await transport.runSSH(
+                        profile: profile,
+                        auth: auth,
+                        remoteCommand: command,
+                        writer: writer,
+                        onLine: logger
+                    )
+
+                    let idLine = result.stdoutLines
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .first { Int($0) != nil }
+
+                    guard let idLine, let attachmentId = Int(idLine) else {
+                        throw JobRunnerError.profileIncomplete("Import did not return attachment ID for \(afterVerify.filename)")
+                    }
+
+                    appendLog("Imported \(afterVerify.filename) as attachment ID \(attachmentId).", writer: writer)
+                    mutateJob(id: jobID) { mutable in
+                        if let idx = mutable.localFiles.firstIndex(where: { $0.id == afterVerify.id }) {
+                            mutable.localFiles[idx].status = .imported
+                            mutable.localFiles[idx].importAttachmentId = attachmentId
+                            mutable.localFiles[idx].errorMessage = nil
+                        }
+
+                        if !mutable.importedIds.contains(attachmentId) {
+                            mutable.importedIds.append(attachmentId)
+                        }
+                    }
+                } catch {
+                    if Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    let message = timeoutAwareMessage(
+                        for: error,
+                        fallback: "Import failed for \(afterVerify.filename): \(error.localizedDescription)"
+                    )
+                    appendLog(message, writer: writer)
+                    updateFile(jobID: jobID, id: afterVerify.id) {
+                        $0.status = .failed
+                        $0.errorMessage = message
+                    }
+                }
+
+                recalculateProgress(jobID: jobID)
+            }
+
+            guard let afterImport = fileSnapshot(jobID: jobID, fileID: fileID) else { continue }
+            if afterImport.status == .imported {
+                try transitionJobStep(jobID: jobID, to: .regenerating, writer: writer)
+
+                do {
+                    guard let attachmentId = afterImport.importAttachmentId else {
+                        throw JobRunnerError.profileIncomplete("Missing attachment ID for \(afterImport.filename)")
+                    }
                     try await regenerateAttachment(
                         profile: profile,
                         auth: auth,
                         writer: writer,
                         attachmentId: attachmentId,
-                        fileName: file.filename
+                        fileName: afterImport.filename
                     )
-
-                    updateFile(jobID: jobID, id: file.id) {
+                    updateFile(jobID: jobID, id: afterImport.id) {
                         $0.status = .regenerated
                         $0.errorMessage = nil
                     }
@@ -678,82 +660,10 @@ final class JobRunner {
                     if Task.isCancelled {
                         throw CancellationError()
                     }
-                    markRegenerationFailed(jobID: jobID, file: file, error: error, writer: writer)
+                    markRegenerationFailed(jobID: jobID, file: afterImport, error: error, writer: writer)
                 }
-            } catch {
-                if Task.isCancelled {
-                    throw CancellationError()
-                }
-                let message = timeoutAwareMessage(
-                    for: error,
-                    fallback: "Import failed for \(file.filename): \(error.localizedDescription)"
-                )
-                appendLog(message, writer: writer)
-                mutateJob(id: jobID) { mutable in
-                    if let idx = mutable.localFiles.firstIndex(where: { $0.id == file.id }) {
-                        mutable.localFiles[idx].status = .failed
-                        mutable.localFiles[idx].errorMessage = message
-                    }
-                }
-                updateImportProgress(
-                    jobID: jobID,
-                    completedCount: index + 1,
-                    totalCount: importTargets.count
-                )
-            }
-        }
 
-        mutateJob(id: jobID) { mutable in
-            mutable.activeFileId = nil
-        }
-    }
-
-    private func regenerateImported(
-        profile: ServerProfile,
-        auth: SSHAuthContext,
-        writer: LogWriter,
-        jobID: UUID
-    ) async throws {
-        try Task.checkCancellation()
-        guard let job = jobSnapshot(id: jobID) else { return }
-
-        let targets = job.localFiles.filter {
-            $0.importAttachmentId != nil && $0.status == .imported
-        }
-
-        if targets.isEmpty {
-            return
-        }
-
-        mutateJob(id: jobID) {
-            $0.step = .regenerating
-            $0.activeFileId = nil
-        }
-
-        for file in targets {
-            try Task.checkCancellation()
-            mutateJob(id: jobID) { mutable in
-                mutable.activeFileId = file.id
-            }
-            do {
-                guard let attachmentId = file.importAttachmentId else { continue }
-                try await regenerateAttachment(
-                    profile: profile,
-                    auth: auth,
-                    writer: writer,
-                    attachmentId: attachmentId,
-                    fileName: file.filename
-                )
-
-                updateFile(jobID: jobID, id: file.id) {
-                    $0.status = .regenerated
-                    $0.errorMessage = nil
-                }
-            } catch {
-                if Task.isCancelled {
-                    throw CancellationError()
-                }
-                markRegenerationFailed(jobID: jobID, file: file, error: error, writer: writer)
+                recalculateProgress(jobID: jobID)
             }
         }
 
@@ -774,6 +684,12 @@ final class JobRunner {
         let baseCommand =
             "wp --path=\(wpPath) media regenerate \(attachmentId) --only-missing --yes"
         let command = wrapWithOptionalTimeout(command: baseCommand, seconds: 600)
+        let heartbeat = startLongCommandHeartbeat(
+            activity: "Regenerating thumbnails for \(fileName)",
+            writer: writer
+        )
+        defer { heartbeat.cancel() }
+
         _ = try await transport.runSSH(
             profile: profile,
             auth: auth,
@@ -792,19 +708,6 @@ final class JobRunner {
         updateFile(jobID: jobID, id: file.id) {
             $0.status = .failed
             $0.errorMessage = message
-        }
-    }
-
-    private func updateImportProgress(jobID: UUID, completedCount: Int, totalCount: Int) {
-        guard totalCount > 0 else {
-            mutateJob(id: jobID) {
-                $0.importProgress = 0
-            }
-            return
-        }
-
-        mutateJob(id: jobID) {
-            $0.importProgress = Double(completedCount) / Double(totalCount)
         }
     }
 
@@ -841,7 +744,12 @@ final class JobRunner {
             throw JobRunnerError.missingFiles
         }
 
-        let supported = urls.filter(isSupportedImageExtension)
+        var seenPaths = Set<String>()
+        let deduplicated = urls.filter { url in
+            seenPaths.insert(url.standardizedFileURL.path).inserted
+        }
+
+        let supported = deduplicated.filter(isSupportedImageExtension)
         guard !supported.isEmpty else {
             throw JobRunnerError.unsupportedImages
         }
@@ -902,6 +810,68 @@ final class JobRunner {
         "\(remoteUploadDirectory(incomingDir: incomingDir, file: file))/\(file.filename)"
     }
 
+    private func shouldProcessSequentially(_ file: FileItem) -> Bool {
+        switch file.status {
+        case .queued, .uploaded, .verified, .imported:
+            return true
+        case .regenerated, .failed:
+            return false
+        }
+    }
+
+    private func isRetryableStatus(_ status: FileItemStatus) -> Bool {
+        switch status {
+        case .queued, .uploaded, .verified, .imported, .failed:
+            return true
+        case .regenerated:
+            return false
+        }
+    }
+
+    private func fileSnapshot(jobID: UUID, fileID: UUID) -> FileItem? {
+        guard let job = jobSnapshot(id: jobID) else { return nil }
+        return job.localFiles.first(where: { $0.id == fileID })
+    }
+
+    private func totalFileCount(jobID: UUID) -> Int {
+        jobSnapshot(id: jobID)?.localFiles.count ?? 0
+    }
+
+    private func uploadedCompletedCount(jobID: UUID, excluding fileID: UUID? = nil) -> Int {
+        guard let job = jobSnapshot(id: jobID) else { return 0 }
+        return job.localFiles.filter { file in
+            if let fileID, file.id == fileID {
+                return false
+            }
+            return [.uploaded, .verified, .imported, .regenerated].contains(file.status)
+        }.count
+    }
+
+    private func recalculateProgress(jobID: UUID) {
+        guard let job = jobSnapshot(id: jobID) else { return }
+
+        let total = Double(job.localFiles.count)
+        guard total > 0 else {
+            mutateJob(id: jobID) { mutable in
+                mutable.uploadProgress = 0
+                mutable.importProgress = 0
+            }
+            return
+        }
+
+        let uploaded = Double(job.localFiles.filter {
+            [.uploaded, .verified, .imported, .regenerated].contains($0.status)
+        }.count)
+        let imported = Double(job.localFiles.filter {
+            [.imported, .regenerated].contains($0.status)
+        }.count)
+
+        mutateJob(id: jobID) { mutable in
+            mutable.uploadProgress = uploaded / total
+            mutable.importProgress = imported / total
+        }
+    }
+
     private func updateFile(jobID: UUID, id: UUID, _ transform: (inout FileItem) -> Void) {
         mutateJob(id: jobID) { mutable in
             guard let idx = mutable.localFiles.firstIndex(where: { $0.id == id }) else { return }
@@ -926,6 +896,25 @@ final class JobRunner {
         }
     }
 
+    private func transitionJobStep(
+        jobID: UUID,
+        to nextStep: JobStep,
+        writer: LogWriter? = nil,
+        updates: ((inout Job) -> Void)? = nil
+    ) throws {
+        guard let currentStep = jobSnapshot(id: jobID)?.step else { return }
+        guard currentStep.canTransition(to: nextStep) else {
+            let error = JobRunnerError.invalidStepTransition(from: currentStep, to: nextStep)
+            appendLog(error.localizedDescription, writer: writer)
+            throw error
+        }
+
+        mutateJob(id: jobID) { mutable in
+            mutable.step = nextStep
+            updates?(&mutable)
+        }
+    }
+
     private func lineLogger(writer: LogWriter?) -> (@Sendable (CommandOutputStream, String) -> Void) {
         { [weak self] stream, line in
             Task { @MainActor in
@@ -947,6 +936,20 @@ final class JobRunner {
         writer?.append(line)
     }
 
+    private func startLongCommandHeartbeat(activity: String, writer: LogWriter?) -> Task<Void, Never> {
+        Task { @MainActor [weak self] in
+            let startedAt = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.longCommandHeartbeatSeconds * 1_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+
+                let elapsed = Date().timeIntervalSince(startedAt)
+                let elapsedLabel = Self.elapsedDurationFormatter.string(from: elapsed) ?? "\(Int(elapsed))s"
+                self.appendLog("\(activity) still running (\(elapsedLabel) elapsed).", writer: writer)
+            }
+        }
+    }
+
     private func wrapWithOptionalTimeout(command: String, seconds: Int) -> String {
         "if command -v timeout >/dev/null 2>&1; then timeout \(seconds) \(command); else \(command); fi"
     }
@@ -959,9 +962,22 @@ final class JobRunner {
         return fallback
     }
 
-    private func playCompletionSoundIfEnabled(success: Bool, profile: ServerProfile) {
-        let globalSettingEnabled = UserDefaults.standard.bool(forKey: Self.playCompletionSoundDefaultsKey)
-        guard profile.playCompletionSoundOnCompletion || globalSettingEnabled else { return }
+    private static let elapsedDurationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute, .second]
+        formatter.unitsStyle = .abbreviated
+        formatter.maximumUnitCount = 2
+        formatter.zeroFormattingBehavior = .dropLeading
+        return formatter
+    }()
+
+    private func notifyCompletionIfEnabled(success: Bool, jobID: UUID) {
+        playCompletionSoundIfEnabled(success: success)
+        showCompletionNotificationIfEnabled(success: success, jobID: jobID)
+    }
+
+    private func playCompletionSoundIfEnabled(success: Bool) {
+        guard UserDefaults.standard.bool(forKey: Self.playCompletionSoundDefaultsKey) else { return }
 
         let soundName: NSSound.Name = success ? .init("Glass") : .init("Basso")
         if NSSound(named: soundName)?.play() != true {
@@ -969,11 +985,41 @@ final class JobRunner {
         }
     }
 
-    private func recoverInterruptedJobs() {
-        let inFlightSteps: Set<JobStep> = [.preflight, .uploading, .verifying, .importing, .regenerating]
+    private func showCompletionNotificationIfEnabled(success: Bool, jobID: UUID) {
+        guard UserDefaults.standard.bool(forKey: Self.showCompletionNotificationDefaultsKey) else { return }
 
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            if settings.authorizationStatus == .authorized {
+                Self.enqueueCompletionNotification(success: success, jobID: jobID)
+                return
+            }
+
+            guard settings.authorizationStatus == .notDetermined else { return }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, _ in
+                guard granted else { return }
+                Self.enqueueCompletionNotification(success: success, jobID: jobID)
+            }
+        }
+    }
+
+    nonisolated private static func enqueueCompletionNotification(success: Bool, jobID: UUID) {
+        let content = UNMutableNotificationContent()
+        content.title = success ? "Upload complete" : "Upload finished with errors"
+        content.body = success
+            ? "All queued files finished processing."
+            : "One or more files failed. Open the app for details."
+
+        let request = UNNotificationRequest(
+            identifier: "job-completion-\(jobID.uuidString)-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    private func recoverInterruptedJobs() {
         for existing in jobStore.jobs {
-            guard inFlightSteps.contains(existing.step) else { continue }
+            guard JobStep.inFlightSteps.contains(existing.step) else { continue }
 
             var recovered = existing
             var hasRetryableFailure = false
@@ -996,6 +1042,17 @@ final class JobRunner {
                 : "Previous run was interrupted before final status update."
             jobStore.upsert(recovered)
         }
+    }
+
+    private func presentBlockingError(_ message: String?) {
+        blockingError = message
+        if message != nil {
+            inlineStatusMessage = nil
+        }
+    }
+
+    private func presentInlineStatusMessage(_ message: String?) {
+        inlineStatusMessage = message
     }
 
     private func readLogLines(atPath path: String) -> [String] {

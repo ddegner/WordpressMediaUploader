@@ -28,6 +28,10 @@ final class ExternalFileIntake {
 final class DockFileOpenDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowObserver: NSObjectProtocol?
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
             ExternalFileIntake.shared.enqueue(urls)

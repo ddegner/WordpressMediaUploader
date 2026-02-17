@@ -20,10 +20,11 @@ struct ProfileTestResult: Sendable {
 final class SSHTransport {
     private let commandRunner = CommandRunner()
     private let profileStore: ProfileStore
+    private var knownHostsPathCache: String?
+    private var didCleanupStaleAskPassScripts = false
 
     init(profileStore: ProfileStore) {
         self.profileStore = profileStore
-        cleanupStaleAskPassScripts()
     }
 
     // MARK: - Stale askpass cleanup (B1)
@@ -37,6 +38,12 @@ final class SSHTransport {
             let fullPath = supportDir.appendingPathComponent(filename, isDirectory: false).path
             try? fm.removeItem(atPath: fullPath)
         }
+    }
+
+    private func cleanupStaleAskPassScriptsIfNeeded() {
+        guard !didCleanupStaleAskPassScripts else { return }
+        didCleanupStaleAskPassScripts = true
+        cleanupStaleAskPassScripts()
     }
 
     // MARK: - Auth context
@@ -67,6 +74,8 @@ final class SSHTransport {
         keyPassphrase: String?,
         passwordMissingDetail: String
     ) throws -> SSHAuthContext {
+        cleanupStaleAskPassScriptsIfNeeded()
+
         switch profile.authType {
         case .sshKey:
             var args: [String] = []
@@ -305,6 +314,9 @@ final class SSHTransport {
             "-o", "ConnectTimeout=10",
             "-o", "ConnectionAttempts=1"
         ]
+        if let knownHostsPath = knownHostsPath() {
+            args += ["-o", "UserKnownHostsFile=\(knownHostsPath)"]
+        }
         args += auth.additionalSSHArgs
         args.append("\(profile.username)@\(profile.host)")
         return args
@@ -318,6 +330,9 @@ final class SSHTransport {
             "-o", "ConnectTimeout=10",
             "-o", "ConnectionAttempts=1"
         ]
+        if let knownHostsPath = knownHostsPath() {
+            parts += ["-o", "UserKnownHostsFile=\(knownHostsPath)"]
+        }
         parts += auth.additionalSSHArgs
         return parts.map(shellSingleQuote).joined(separator: " ")
     }
@@ -392,6 +407,26 @@ final class SSHTransport {
         } catch {
             throw JobRunnerError.authSetupFailed(error.localizedDescription)
         }
+    }
+
+    private func knownHostsPath() -> String? {
+        if let knownHostsPathCache {
+            return knownHostsPathCache
+        }
+
+        let knownHostsFileURL = AppPaths.appSupportDirectory
+            .appendingPathComponent("known_hosts", isDirectory: false)
+        let fileManager = FileManager.default
+        let parent = knownHostsFileURL.deletingLastPathComponent()
+        AppPaths.ensureDirectory(parent)
+
+        if !fileManager.fileExists(atPath: knownHostsFileURL.path) {
+            fileManager.createFile(atPath: knownHostsFileURL.path, contents: Data())
+        }
+
+        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: knownHostsFileURL.path)
+        knownHostsPathCache = knownHostsFileURL.path
+        return knownHostsPathCache
     }
 }
 

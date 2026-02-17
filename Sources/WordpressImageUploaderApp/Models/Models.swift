@@ -30,7 +30,6 @@ struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
     var remoteStagingRoot: String
     var bwLimitKBps: Int?
     var keepRemoteFiles: Bool
-    var playCompletionSoundOnCompletion: Bool
 
     static let `default` = ServerProfile(
         id: UUID(),
@@ -45,47 +44,8 @@ struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
         wpRootPath: "",
         remoteStagingRoot: "~/wp-media-import",
         bwLimitKBps: nil,
-        keepRemoteFiles: false,
-        playCompletionSoundOnCompletion: false
+        keepRemoteFiles: false
     )
-}
-
-extension ServerProfile {
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case host
-        case port
-        case username
-        case authType
-        case keyPath
-        case keyPassphraseKeychainId
-        case passwordKeychainId
-        case wpRootPath
-        case remoteStagingRoot
-        case bwLimitKBps
-        case keepRemoteFiles
-        case playCompletionSoundOnCompletion
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        host = try container.decode(String.self, forKey: .host)
-        port = try container.decode(Int.self, forKey: .port)
-        username = try container.decode(String.self, forKey: .username)
-        authType = try container.decode(AuthenticationType.self, forKey: .authType)
-        keyPath = try container.decodeIfPresent(String.self, forKey: .keyPath)
-        keyPassphraseKeychainId = try container.decodeIfPresent(String.self, forKey: .keyPassphraseKeychainId)
-        passwordKeychainId = try container.decodeIfPresent(String.self, forKey: .passwordKeychainId)
-        wpRootPath = try container.decode(String.self, forKey: .wpRootPath)
-        remoteStagingRoot = try container.decode(String.self, forKey: .remoteStagingRoot)
-        bwLimitKBps = try container.decodeIfPresent(Int.self, forKey: .bwLimitKBps)
-        keepRemoteFiles = try container.decode(Bool.self, forKey: .keepRemoteFiles)
-        playCompletionSoundOnCompletion =
-            try container.decodeIfPresent(Bool.self, forKey: .playCompletionSoundOnCompletion) ?? false
-    }
 }
 
 enum FileItemStatus: String, Codable, CaseIterable, Sendable {
@@ -125,6 +85,41 @@ enum JobStep: String, Codable, Sendable {
     case finished
     case failed
     case cancelled
+}
+
+extension JobStep {
+    static let inFlightSteps: Set<JobStep> = [
+        .preflight,
+        .uploading,
+        .verifying,
+        .importing,
+        .regenerating
+    ]
+
+    var isTerminal: Bool {
+        switch self {
+        case .finished, .failed, .cancelled:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func canTransition(to next: JobStep) -> Bool {
+        if self == next {
+            return true
+        }
+
+        if Self.inFlightSteps.contains(self) {
+            return Self.inFlightSteps.contains(next) || next.isTerminal
+        }
+
+        if isTerminal {
+            return next == .preflight
+        }
+
+        return false
+    }
 }
 
 struct Job: Identifiable, Codable, Sendable {

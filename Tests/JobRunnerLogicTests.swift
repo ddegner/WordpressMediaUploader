@@ -93,6 +93,45 @@ final class JobRunnerLogicTests: XCTestCase {
         XCTAssertEqual(items.count, 2)
     }
 
+    @MainActor
+    func testPrepareFileItemsDeduplicatesSamePath() throws {
+        let fm = FileManager.default
+        let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("wp-uploader-tests-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = tempRoot.appendingPathComponent("one.jpg", isDirectory: false)
+
+        try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        try Data([0x00, 0x01]).write(to: fileURL)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        let items = try runner.prepareFileItems(urls: [fileURL, fileURL])
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.localURL.standardizedFileURL.path, fileURL.standardizedFileURL.path)
+    }
+
+    // MARK: - connection test isolation
+
+    @MainActor
+    func testConnectionWhileRunIsActiveReturnsEarlyFailure() async {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+        runner.isRunning = true
+
+        let result = await runner.testConnection(
+            profile: .default,
+            password: nil,
+            keyPassphrase: nil
+        )
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.checks, ["Stop the active upload before running Test Connection."])
+    }
+
     // MARK: - validateProfile
 
     @MainActor
@@ -181,6 +220,157 @@ final class JobRunnerLogicTests: XCTestCase {
         profile.keyPath = "/path/that/does/not/exist/id_ed25519"
 
         XCTAssertNoThrow(try runner.validateProfile(profile, password: "secret"))
+    }
+
+    // MARK: - runner message routing
+
+    @MainActor
+    func testCanRetryFailedIsTrueForCancelledJobWithUnfinishedFiles() {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        var file = FileItem(localURL: URL(fileURLWithPath: "/tmp/a.jpg"), filename: "a.jpg", sizeBytes: 10)
+        file.status = .verified
+
+        var job = Job(
+            profileId: UUID(),
+            remoteJobDir: "/tmp/job",
+            files: [file],
+            logsPath: "/tmp/log.txt"
+        )
+        job.step = .cancelled
+        runner.currentJob = job
+
+        XCTAssertTrue(runner.canRetryFailed)
+    }
+
+    @MainActor
+    func testCanRetryFailedIsTrueForFailedJobWithQueuedFiles() {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        var file = FileItem(localURL: URL(fileURLWithPath: "/tmp/a.jpg"), filename: "a.jpg", sizeBytes: 10)
+        file.status = .queued
+
+        var job = Job(
+            profileId: UUID(),
+            remoteJobDir: "/tmp/job",
+            files: [file],
+            logsPath: "/tmp/log.txt"
+        )
+        job.step = .failed
+        runner.currentJob = job
+
+        XCTAssertTrue(runner.canRetryFailed)
+    }
+
+    @MainActor
+    func testCanRetryFailedIsFalseForCancelledJobWithAllFilesCompleted() {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        var file = FileItem(localURL: URL(fileURLWithPath: "/tmp/a.jpg"), filename: "a.jpg", sizeBytes: 10)
+        file.status = .regenerated
+
+        var job = Job(
+            profileId: UUID(),
+            remoteJobDir: "/tmp/job",
+            files: [file],
+            logsPath: "/tmp/log.txt"
+        )
+        job.step = .cancelled
+        runner.currentJob = job
+
+        XCTAssertFalse(runner.canRetryFailed)
+    }
+
+    @MainActor
+    func testStartWithInvalidInputClearsInlineStatusAndSetsBlockingError() {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        runner.inlineStatusMessage = "Old inline message"
+        runner.start(profile: ServerProfile.default, fileURLs: [])
+
+        XCTAssertNil(runner.inlineStatusMessage)
+        XCTAssertEqual(runner.blockingError, JobRunnerError.missingFiles.localizedDescription)
+    }
+
+    @MainActor
+    func testLoadJobWhileRunningKeepsCurrentJobAndSetsInlineMessage() {
+        let profileStore = ProfileStore()
+        let jobStore = JobStore()
+        let runner = JobRunner(profileStore: profileStore, jobStore: jobStore)
+
+        let current = Job(
+            profileId: UUID(),
+            remoteJobDir: "/tmp/current",
+            files: [],
+            logsPath: "/tmp/current.log"
+        )
+        let target = Job(
+            profileId: UUID(),
+            remoteJobDir: "/tmp/target",
+            files: [],
+            logsPath: "/tmp/target.log"
+        )
+
+        runner.currentJob = current
+        runner.isRunning = true
+
+        runner.loadJob(target)
+
+        XCTAssertEqual(runner.currentJob?.id, current.id)
+        XCTAssertEqual(runner.inlineStatusMessage, "Cannot switch jobs while a run is active.")
+    }
+
+    // MARK: - JobStep lifecycle
+
+    func testJobStepInFlightStepsMatchesExpectedPipelineStages() {
+        XCTAssertEqual(
+            JobStep.inFlightSteps,
+            Set([.preflight, .uploading, .verifying, .importing, .regenerating])
+        )
+    }
+
+    func testJobStepIsTerminalForTerminalStatesOnly() {
+        XCTAssertTrue(JobStep.finished.isTerminal)
+        XCTAssertTrue(JobStep.failed.isTerminal)
+        XCTAssertTrue(JobStep.cancelled.isTerminal)
+        XCTAssertFalse(JobStep.preflight.isTerminal)
+        XCTAssertFalse(JobStep.uploading.isTerminal)
+        XCTAssertFalse(JobStep.verifying.isTerminal)
+        XCTAssertFalse(JobStep.importing.isTerminal)
+        XCTAssertFalse(JobStep.regenerating.isTerminal)
+    }
+
+    func testJobStepInFlightCanTransitionToInFlightAndTerminal() {
+        XCTAssertTrue(JobStep.preflight.canTransition(to: .uploading))
+        XCTAssertTrue(JobStep.uploading.canTransition(to: .verifying))
+        XCTAssertTrue(JobStep.verifying.canTransition(to: .importing))
+        XCTAssertTrue(JobStep.importing.canTransition(to: .regenerating))
+        XCTAssertTrue(JobStep.regenerating.canTransition(to: .uploading))
+        XCTAssertTrue(JobStep.uploading.canTransition(to: .failed))
+        XCTAssertTrue(JobStep.importing.canTransition(to: .cancelled))
+        XCTAssertTrue(JobStep.regenerating.canTransition(to: .finished))
+    }
+
+    func testJobStepTerminalCanOnlyTransitionBackToPreflightOrStaySame() {
+        XCTAssertTrue(JobStep.finished.canTransition(to: .preflight))
+        XCTAssertTrue(JobStep.failed.canTransition(to: .preflight))
+        XCTAssertTrue(JobStep.cancelled.canTransition(to: .preflight))
+
+        XCTAssertTrue(JobStep.finished.canTransition(to: .finished))
+        XCTAssertTrue(JobStep.failed.canTransition(to: .failed))
+        XCTAssertTrue(JobStep.cancelled.canTransition(to: .cancelled))
+
+        XCTAssertFalse(JobStep.finished.canTransition(to: .uploading))
+        XCTAssertFalse(JobStep.failed.canTransition(to: .verifying))
+        XCTAssertFalse(JobStep.cancelled.canTransition(to: .importing))
     }
 
     // MARK: - Helpers

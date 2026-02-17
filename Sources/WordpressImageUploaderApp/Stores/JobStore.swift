@@ -4,13 +4,7 @@ import Observation
 @MainActor
 @Observable
 final class JobStore {
-    private static let inFlightSteps: Set<JobStep> = [
-        .preflight,
-        .uploading,
-        .verifying,
-        .importing,
-        .regenerating
-    ]
+    private static let maxStoredJobs = 100
 
     var jobs: [Job] = []
 
@@ -19,23 +13,36 @@ final class JobStore {
     }
 
     func upsert(_ job: Job) {
+        var logPathsToDelete: [String] = []
+
         if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
+            let previousLogPath = jobs[idx].logsPath
             jobs[idx] = job
+            if previousLogPath != job.logsPath {
+                logPathsToDelete.append(previousLogPath)
+            }
         } else {
             jobs.insert(job, at: 0)
         }
 
         jobs.sort { $0.createdAt > $1.createdAt }
-        if jobs.count > 100 {
-            jobs = Array(jobs.prefix(100))
+        if jobs.count > Self.maxStoredJobs {
+            let removed = jobs[Self.maxStoredJobs...]
+            logPathsToDelete.append(contentsOf: removed.map(\.logsPath))
+            jobs = Array(jobs.prefix(Self.maxStoredJobs))
         }
 
-        save()
+        if save() {
+            cleanupLogFiles(atPaths: logPathsToDelete)
+        }
     }
 
     func clear() {
+        let logPaths = jobs.map(\.logsPath)
         jobs.removeAll()
-        save()
+        if save() {
+            cleanupLogFiles(atPaths: logPaths)
+        }
     }
 
     func job(id: UUID) -> Job? {
@@ -44,13 +51,19 @@ final class JobStore {
 
     func removeActiveJobs() {
         let before = jobs.count
-        jobs.removeAll { Self.inFlightSteps.contains($0.step) }
+        let removedLogPaths = jobs
+            .filter { JobStep.inFlightSteps.contains($0.step) }
+            .map(\.logsPath)
+        jobs.removeAll { JobStep.inFlightSteps.contains($0.step) }
         if jobs.count != before {
-            save()
+            if save() {
+                cleanupLogFiles(atPaths: removedLogPaths)
+            }
         }
     }
 
-    private func save() {
+    @discardableResult
+    private func save() -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -58,8 +71,10 @@ final class JobStore {
         do {
             let data = try encoder.encode(jobs)
             try data.write(to: AppPaths.jobsFile, options: [.atomic])
+            return true
         } catch {
             print("Failed to save jobs: \(error)")
+            return false
         }
     }
 
@@ -71,6 +86,20 @@ final class JobStore {
             jobs = try decoder.decode([Job].self, from: data)
         } catch {
             jobs = []
+        }
+    }
+
+    private func cleanupLogFiles(atPaths paths: [String]) {
+        guard !paths.isEmpty else { return }
+
+        let fileManager = FileManager.default
+        let uniquePaths = Set(paths.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+
+        for path in uniquePaths where !path.isEmpty {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else { continue }
+            guard !isDirectory.boolValue else { continue }
+            try? fileManager.removeItem(atPath: path)
         }
     }
 }

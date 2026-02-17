@@ -12,6 +12,7 @@ struct WindowCommandActions {
     let startUpload: () -> Void
     let clearJobHistory: () -> Void
     let openLog: () -> Void
+    let copyVisibleLog: () -> Void
     let copyReport: () -> Void
     let exportJSONReport: () -> Void
     let exportCSVReport: () -> Void
@@ -28,6 +29,7 @@ struct WindowCommandActions {
     let canStartUpload: Bool
     let canClearJobHistory: Bool
     let canOpenLog: Bool
+    let canCopyVisibleLog: Bool
     let canCopyReport: Bool
     let canExportJSONReport: Bool
     let canExportCSVReport: Bool
