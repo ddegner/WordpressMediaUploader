@@ -69,6 +69,28 @@ xcodegen generate
 open "WordpressMediaUploader.xcodeproj"
 ```
 
+## Distribution (Signed + Notarized)
+
+Use the release script (this is the default distribution path):
+
+```bash
+./scripts/build_distribution.sh
+```
+
+Credentials for notarization:
+
+- Preferred: set `NOTARY_KEYCHAIN_PROFILE` to a notarytool keychain profile name.
+- Alternative: set `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_SPECIFIC_PASSWORD`.
+
+The script will:
+
+- Build a Release app
+- Sign with Developer ID (`DEVELOPER_ID_APP_CERT`, defaults to this repo's Developer ID cert)
+- Submit for notarization and wait for acceptance
+- Staple the notarization ticket
+- Produce `WPMediaUploader-v<version>-macOS.zip`
+- Send a macOS notification on success/failure
+
 ## How It Works
 
 1. **Create a server profile** with your SSH credentials and WordPress root path
