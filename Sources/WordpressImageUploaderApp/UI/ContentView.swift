@@ -284,7 +284,7 @@ struct ContentView: View {
             .onAppear {
                 splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: true)
                 rightPane = rightPane ?? .activeJob
-                ingestExternalFiles()
+                ingestExternalFilesIfPreferredWindow()
                 seedRuntimeAnchorForActiveJob(force: true)
                 if selectedProfileId == nil {
                     selectedProfileId = profileStore.profiles.first?.id
@@ -294,6 +294,10 @@ struct ContentView: View {
                 }
             }
             .onChange(of: externalFileIntake.sequence) { _, _ in
+                ingestExternalFilesIfPreferredWindow()
+            }
+            .onChange(of: controlActiveState) { _, state in
+                guard state == .key else { return }
                 ingestExternalFiles()
             }
             .onChange(of: jobRunner.isRunning) { _, running in
@@ -316,7 +320,8 @@ struct ContentView: View {
                 }
             }
             .onOpenURL { url in
-                addFiles([url])
+                externalFileIntake.enqueue([url])
+                ingestExternalFilesIfPreferredWindow()
             }
     }
 
@@ -1329,6 +1334,11 @@ struct ContentView: View {
 
     private func ingestExternalFiles() {
         addFiles(externalFileIntake.drain())
+    }
+
+    private func ingestExternalFilesIfPreferredWindow() {
+        guard controlActiveState == .key else { return }
+        ingestExternalFiles()
     }
 
     private func clearAllFiles() {

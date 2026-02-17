@@ -120,7 +120,7 @@ struct WordpressMediaUploaderApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("") {
+        Window("WP Media Uploader", id: "main") {
             AppWindowRootView(
                 profileStore: profileStore,
                 jobStore: jobStore,
