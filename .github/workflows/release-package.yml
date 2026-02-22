@@ -1,0 +1,132 @@
+name: Release And Package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release-and-package:
+    runs-on: macos-14
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_REPO: ${{ github.repository }}
+      PUBLISH_GITHUB_RELEASE: "1"
+      PUBLISH_GITHUB_PACKAGE: ${{ vars.PUBLISH_GITHUB_PACKAGE != '' && vars.PUBLISH_GITHUB_PACKAGE || '1' }}
+      NOTARY_KEYCHAIN_PROFILE: ${{ secrets.NOTARY_KEYCHAIN_PROFILE != '' && secrets.NOTARY_KEYCHAIN_PROFILE || 'notary-profile' }}
+      DEVELOPER_ID_APP_CERT: ${{ secrets.DEVELOPER_ID_APP_CERT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          DEVELOPER_ID_CERT_P12_BASE64: ${{ secrets.DEVELOPER_ID_CERT_P12_BASE64 }}
+          DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          DEVELOPER_ID_APP_CERT: ${{ secrets.DEVELOPER_ID_APP_CERT }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          required=(
+            DEVELOPER_ID_CERT_P12_BASE64
+            DEVELOPER_ID_CERT_PASSWORD
+            KEYCHAIN_PASSWORD
+            DEVELOPER_ID_APP_CERT
+            APPLE_ID
+            APPLE_TEAM_ID
+            APPLE_APP_SPECIFIC_PASSWORD
+          )
+          for key in "${required[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "::error::Missing required secret: ${key}"
+              exit 1
+            fi
+          done
+
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          DEVELOPER_ID_CERT_P12_BASE64: ${{ secrets.DEVELOPER_ID_CERT_P12_BASE64 }}
+          DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain_path="$RUNNER_TEMP/build-signing.keychain-db"
+          cert_path="$RUNNER_TEMP/developer-id.p12"
+
+          echo "$DEVELOPER_ID_CERT_P12_BASE64" | base64 --decode > "$cert_path"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security import "$cert_path" -k "$keychain_path" -P "$DEVELOPER_ID_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Configure notary profile
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool store-credentials "$NOTARY_KEYCHAIN_PROFILE" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
+      - name: Build, notarize, staple, and publish Release assets
+        shell: bash
+        run: ./scripts/build_distribution.sh
+
+      - name: Capture release metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk -F'"' '/MARKETING_VERSION:/ { print $2; exit }' project.yml)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "zip_name=WPMediaUploader-v${version}-macOS.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WPMediaUploader-v${{ steps.metadata.outputs.version }}
+          path: |
+            ${{ steps.metadata.outputs.zip_name }}
+            output/release/v${{ steps.metadata.outputs.version }}/sha256.txt
+            output/release/v${{ steps.metadata.outputs.version }}/notary.log
+
+      - name: Install ORAS
+        if: ${{ env.PUBLISH_GITHUB_PACKAGE == '1' }}
+        shell: bash
+        run: brew install oras
+
+      - name: Publish package to GHCR
+        if: ${{ env.PUBLISH_GITHUB_PACKAGE == '1' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          ref="ghcr.io/${owner}/wp-media-uploader:v${{ steps.metadata.outputs.version }}"
+
+          echo "$GH_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          oras push "$ref" \
+            "${{ steps.metadata.outputs.zip_name }}:application/zip" \
+            "output/release/v${{ steps.metadata.outputs.version }}/sha256.txt:text/plain" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --annotation "org.opencontainers.image.version=v${{ steps.metadata.outputs.version }}"

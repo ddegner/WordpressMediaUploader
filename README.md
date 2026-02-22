@@ -1,8 +1,8 @@
 # WP Media Uploader
 
-[Download macOS binary (v1.0)](https://github.com/ddegner/WPMediaUploader/raw/main/WPMediaUploader-v1.0-macOS.zip)
+[Download macOS binary (v1.0)](https://github.com/ddegner/wp-media-uploader/releases/download/v1.0/WPMediaUploader-v1.0-macOS.zip)
 
-WordPress media uploader for macOS.
+WordPress media uploader with SSH + WP-CLI automation.
 An independent, open source macOS app to upload media to WordPress sites.
 
 Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to handle large media libraries efficiently.
@@ -80,6 +80,7 @@ Use the release script (this is the default distribution path):
 Credentials for notarization:
 
 - Preferred: set `NOTARY_KEYCHAIN_PROFILE` to a notarytool keychain profile name.
+- Default fallback: if unset, the script uses `notary-profile`.
 - Alternative: set `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_SPECIFIC_PASSWORD`.
 
 The script will:
@@ -89,7 +90,45 @@ The script will:
 - Submit for notarization and wait for acceptance
 - Staple the notarization ticket
 - Produce `WPMediaUploader-v<version>-macOS.zip`
+- Ensure git tag `v<version>` points to `HEAD` and is pushed to `origin`
+- Create or update GitHub Release `v<version>` (marked latest) with zip + `sha256.txt`
 - Send a macOS notification on success/failure
+
+GitHub release publishing controls:
+
+- Default: enabled (`PUBLISH_GITHUB_RELEASE=1`)
+- Disable: set `PUBLISH_GITHUB_RELEASE=0`
+- Override repo slug detection: set `GITHUB_REPO=owner/repo`
+- Requires authenticated GitHub CLI (`gh auth status`)
+
+### GitHub Actions Automation (Releases + Packages)
+
+Tag pushes (`v*`) trigger `.github/workflows/release-package.yml`, which runs the same native release flow:
+
+- Build Release app
+- Sign, notarize, and staple
+- Publish GitHub Release assets
+- Publish a GitHub Package (GHCR OCI artifact) containing the zip + `sha256.txt`
+
+Required repository secrets:
+
+- `DEVELOPER_ID_CERT_P12_BASE64`
+- `DEVELOPER_ID_CERT_PASSWORD`
+- `KEYCHAIN_PASSWORD`
+- `DEVELOPER_ID_APP_CERT`
+- `APPLE_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+
+Optional repository secret:
+
+- `NOTARY_KEYCHAIN_PROFILE` (defaults to `notary-profile`)
+
+## App Store Connect Submission
+
+For the verified App Store Connect auth + submission workflow (including WP Media Uploader and Cat Scratches app IDs), see:
+
+- `APP_STORE_CONNECT_SUBMISSION_RUNBOOK.md`
 
 ## How It Works
 

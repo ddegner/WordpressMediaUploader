@@ -1,4 +1,5 @@
 .DS_Store
+.codex/
 .build/
 .swiftpm/
 .derived/
@@ -6,5 +7,17 @@ DerivedData/
 *.xcresult/
 Package.resolved
 *.xcodeproj/
+
+# Distribution/build artifacts
 *.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.dmg
+*.pkg
 output/

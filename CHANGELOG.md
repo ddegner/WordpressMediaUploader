@@ -6,8 +6,12 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - `scripts/build_distribution.sh` now publishes a GitHub Release by default: it ensures `v<version>` tag alignment with `HEAD`, pushes the tag to `origin`, and creates/updates the release with `WPMediaUploader-v<version>-macOS.zip` plus `sha256.txt`.
+- `scripts/build_distribution.sh` now defaults `NOTARY_KEYCHAIN_PROFILE` to `notary-profile` (still overrideable via env).
 - Starting an upload no longer forces the operations drawer open; if the drawer is hidden, it remains hidden.
 - Queue row status now shows `PREFLIGHT` during preflight, uses an in-progress spinner for preflight rows, and aligns preflight hover text with active preflight processing.
+
+### Added
+- GitHub Actions release automation at `.github/workflows/release-package.yml` to build/sign/notarize/staple on tag pushes, publish GitHub Release assets, and publish a GHCR package containing the release zip + checksum.
 
 ## [1.0] - 2026-02-17
 
