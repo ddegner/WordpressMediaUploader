@@ -971,6 +971,7 @@ struct ContentView: View {
         .help(
             FileRowPresentation.helpText(
                 for: item,
+                rowStatus: rowStatus,
                 isQueuedSource: file.source == .queued
             )
         )
@@ -984,6 +985,8 @@ struct ContentView: View {
                 Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
             case .regenerated:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            case .preflight:
+                ProgressView().controlSize(.small)
             case .uploading, .verifying, .importing, .regenerating:
                 if isActivelyRunning(file, in: job) {
                     ProgressView().controlSize(.small)
@@ -1357,7 +1360,9 @@ struct ContentView: View {
         if jobRunner.isRunning {
             droppedFileItems.removeAll()
             selectedFileRowIDs.removeAll()
-            selectOperationsPane(.activeJob)
+            if isOperationsDrawerVisible {
+                selectOperationsPane(.activeJob)
+            }
         }
     }
 

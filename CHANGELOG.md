@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+- `scripts/build_distribution.sh` now publishes a GitHub Release by default: it ensures `v<version>` tag alignment with `HEAD`, pushes the tag to `origin`, and creates/updates the release with `WPMediaUploader-v<version>-macOS.zip` plus `sha256.txt`.
+- Starting an upload no longer forces the operations drawer open; if the drawer is hidden, it remains hidden.
+- Queue row status now shows `PREFLIGHT` during preflight, uses an in-progress spinner for preflight rows, and aligns preflight hover text with active preflight processing.
+
 ## [1.0] - 2026-02-17
 
 ### Added

@@ -8,6 +8,7 @@ enum FileRowTone: Sendable {
 }
 
 enum FileRowStatus: Equatable, Sendable {
+    case preflight
     case queued
     case uploading
     case uploaded
@@ -21,6 +22,7 @@ enum FileRowStatus: Equatable, Sendable {
 
     var label: String {
         switch self {
+        case .preflight: return "preflight"
         case .queued: return "queued"
         case .uploading: return "uploading"
         case .uploaded: return "uploaded"
@@ -40,7 +42,7 @@ enum FileRowStatus: Equatable, Sendable {
             return .failure
         case .regenerated:
             return .success
-        case .uploading, .uploaded, .verifying, .verified, .importing, .imported, .regenerating:
+        case .preflight, .uploading, .uploaded, .verifying, .verified, .importing, .imported, .regenerating:
             return .progress
         case .queued:
             return .secondary
@@ -55,6 +57,10 @@ enum FileRowStatus: Equatable, Sendable {
     ) -> FileRowStatus {
         if isQueuedSource {
             return .queued
+        }
+
+        if currentStep == .preflight, item.status == .queued {
+            return .preflight
         }
 
         if isActiveFile, let currentStep {
@@ -90,9 +96,13 @@ enum FileRowStatus: Equatable, Sendable {
 }
 
 enum FileRowPresentation {
-    static func helpText(for item: FileItem, isQueuedSource: Bool) -> String {
+    static func helpText(for item: FileItem, rowStatus: FileRowStatus, isQueuedSource: Bool) -> String {
         if isQueuedSource {
             return "Queued for next run"
+        }
+
+        if rowStatus == .preflight {
+            return "Running preflight checks and preparing staging."
         }
 
         switch item.status {
