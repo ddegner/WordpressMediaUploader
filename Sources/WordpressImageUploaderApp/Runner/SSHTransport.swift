@@ -30,13 +30,14 @@ final class SSHTransport {
     // MARK: - Stale askpass cleanup (B1)
 
     private func cleanupStaleAskPassScripts() {
-        let supportDir = AppPaths.appSupportDirectory
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(atPath: supportDir.path) else { return }
+        for directory in askPassDirectories() {
+            guard let contents = try? fm.contentsOfDirectory(atPath: directory.path) else { continue }
 
-        for filename in contents where filename.hasPrefix("askpass-") && filename.hasSuffix(".sh") {
-            let fullPath = supportDir.appendingPathComponent(filename, isDirectory: false).path
-            try? fm.removeItem(atPath: fullPath)
+            for filename in contents where filename.hasPrefix("askpass-") && filename.hasSuffix(".sh") {
+                let fullPath = directory.appendingPathComponent(filename, isDirectory: false).path
+                try? fm.removeItem(atPath: fullPath)
+            }
         }
     }
 
@@ -390,7 +391,16 @@ final class SSHTransport {
     }
 
     private func createAskPassScript(secret: String) throws -> URL {
-        let scriptURL = AppPaths.appSupportDirectory.appendingPathComponent(
+        let scriptDirectory = askPassDirectory()
+        AppPaths.ensureDirectory(scriptDirectory)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptDirectory.path)
+
+        var directoryValues = URLResourceValues()
+        directoryValues.isExcludedFromBackup = true
+        var mutableDirectoryURL = scriptDirectory
+        try? mutableDirectoryURL.setResourceValues(directoryValues)
+
+        let scriptURL = scriptDirectory.appendingPathComponent(
             "askpass-\(UUID().uuidString).sh",
             isDirectory: false
         )
@@ -403,10 +413,27 @@ final class SSHTransport {
         do {
             try script.write(to: scriptURL, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+            var fileValues = URLResourceValues()
+            fileValues.isExcludedFromBackup = true
+            var mutableScriptURL = scriptURL
+            try? mutableScriptURL.setResourceValues(fileValues)
             return scriptURL
         } catch {
             throw JobRunnerError.authSetupFailed(error.localizedDescription)
         }
+    }
+
+    private func askPassDirectories() -> [URL] {
+        [
+            AppPaths.appSupportDirectory,
+            askPassDirectory()
+        ]
+    }
+
+    private func askPassDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPMediaUploader", isDirectory: true)
+            .appendingPathComponent("askpass", isDirectory: true)
     }
 
     private func knownHostsPath() -> String? {

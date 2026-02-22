@@ -49,4 +49,4 @@ If you download the app through Apple platforms, Apple may process data accordin
 
 For privacy questions, open an issue at:
 
-https://github.com/ddegner/WPMediaUploader/issues
+https://github.com/ddegner/wp-media-uploader/issues

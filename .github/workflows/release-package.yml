@@ -19,6 +19,8 @@ jobs:
       PUBLISH_GITHUB_PACKAGE: ${{ vars.PUBLISH_GITHUB_PACKAGE != '' && vars.PUBLISH_GITHUB_PACKAGE || '1' }}
       NOTARY_KEYCHAIN_PROFILE: ${{ secrets.NOTARY_KEYCHAIN_PROFILE != '' && secrets.NOTARY_KEYCHAIN_PROFILE || 'notary-profile' }}
       DEVELOPER_ID_APP_CERT: ${{ secrets.DEVELOPER_ID_APP_CERT }}
+      KEYCHAIN_PATH: ${{ runner.temp }}/build-signing.keychain-db
+      CERT_PATH: ${{ runner.temp }}/developer-id.p12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,18 +63,16 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
-          keychain_path="$RUNNER_TEMP/build-signing.keychain-db"
-          cert_path="$RUNNER_TEMP/developer-id.p12"
 
-          echo "$DEVELOPER_ID_CERT_P12_BASE64" | base64 --decode > "$cert_path"
+          echo "$DEVELOPER_ID_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security set-keychain-settings -lut 21600 "$keychain_path"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security list-keychains -d user -s "$keychain_path"
-          security import "$cert_path" -k "$keychain_path" -P "$DEVELOPER_ID_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security find-identity -v -p codesigning "$keychain_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$DEVELOPER_ID_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - name: Configure notary profile
         shell: bash
@@ -130,3 +130,10 @@ jobs:
             "output/release/v${{ steps.metadata.outputs.version }}/sha256.txt:text/plain" \
             --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --annotation "org.opencontainers.image.version=v${{ steps.metadata.outputs.version }}"
+
+      - name: Cleanup credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f "$CERT_PATH" || true
+          security delete-keychain "$KEYCHAIN_PATH" >/dev/null 2>&1 || true

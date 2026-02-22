@@ -12,6 +12,12 @@ All notable changes to this project are documented in this file.
 
 ### Added
 - GitHub Actions release automation at `.github/workflows/release-package.yml` to build/sign/notarize/staple on tag pushes, publish GitHub Release assets, and publish a GHCR package containing the release zip + checksum.
+- `scripts/app_store_resubmit.sh` to update App Store metadata and submit versions for review, with explicit credential/version inputs and `umask 077`.
+- `APP_STORE_CONNECT_SUBMISSION_RUNBOOK.md` and `APP_STORE_METADATA.md` for repeatable App Store Connect submission and metadata remediation steps.
+
+### Security
+- Transient `SSH_ASKPASS` scripts now use a locked system temp directory with restrictive permissions and backup exclusion, while preserving stale script cleanup for legacy app-support locations.
+- Release workflow now explicitly cleans imported signing credentials (temporary keychain and `.p12`) at job end.
 
 ## [1.0] - 2026-02-17
 
