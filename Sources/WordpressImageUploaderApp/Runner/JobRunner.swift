@@ -31,6 +31,11 @@ enum JobRunnerError: LocalizedError {
 final class JobRunner {
     static let playCompletionSoundDefaultsKey = "playCompletionSoundOnCompletion"
     static let showCompletionNotificationDefaultsKey = "showCompletionNotificationOnCompletion"
+    
+    struct IdentifiedLogLine: Identifiable {
+        let id: Int
+        let text: String
+    }
 
     private actor ConnectionTestTimeoutState {
         private(set) var triggered = false
@@ -44,7 +49,7 @@ final class JobRunner {
     private static let longCommandHeartbeatSeconds: UInt64 = 20
 
     var currentJob: Job?
-    var logLines: [String] = []
+    var logLines: [IdentifiedLogLine] = []
     var isRunning = false
     var blockingError: String?
     var inlineStatusMessage: String?
@@ -53,9 +58,10 @@ final class JobRunner {
     private let jobStore: JobStore
     private let transport: SSHTransport
 
-    private var activeTask: Task<Void, Never>?
     private var activeRunJobID: UUID?
     private var isCancelling = false
+    private var jobTask: Task<Void, Error>?
+    private var logLineCounter = 0
 
     static func requestCompletionNotificationAuthorizationIfNeeded() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
@@ -166,7 +172,7 @@ final class JobRunner {
 
         appendLog("Cancellation requested by user.", writer: nil)
 
-        activeTask?.cancel()
+        jobTask?.cancel()
         Task {
             await transport.cancelActiveProcess()
         }
@@ -282,83 +288,88 @@ final class JobRunner {
         presentBlockingError(nil)
         inlineStatusMessage = nil
 
-        activeTask = Task { [weak self] in
-            guard let self else { return }
-
+        jobTask = Task { @MainActor in
             defer {
                 self.isRunning = false
                 self.isCancelling = false
-                self.activeTask = nil
+                self.jobTask = nil
                 self.activeRunJobID = nil
             }
 
-            guard let job = self.jobSnapshot(id: jobID) else {
-                self.presentBlockingError("The selected job no longer exists.")
-                return
-            }
-
-            let logURL = URL(fileURLWithPath: job.logsPath)
-            let writer = LogWriter(fileURL: logURL)
-            self.appendLog("Job started: \(job.id.uuidString)", writer: writer)
-
-            let logger = self.lineLogger(writer: writer)
-            var authContext: SSHAuthContext?
-            defer {
-                authContext?.cleanup()
-            }
-
             do {
-                try self.validateProfile(profile)
-                let auth = try self.transport.makeAuthContext(for: profile)
-                authContext = auth
-
-                try Task.checkCancellation()
-                let home = try await self.transport.fetchRemoteHomeDirectory(
-                    profile: profile,
-                    auth: auth,
-                    writer: writer,
-                    onLine: logger
-                )
-
-                let resolvedRoot = resolvedStagingRoot(profile: profile, homeDirectory: home)
-                self.mutateJob(id: jobID) { mutable in
-                    mutable.remoteJobDir = "\(ensureNoTrailingSlash(resolvedRoot))/\(mutable.id.uuidString)"
-                }
-
-                try Task.checkCancellation()
-                try await self.preflight(profile: profile, auth: auth, writer: writer, jobID: jobID)
-
-                try Task.checkCancellation()
-                try await self.ensureRemoteJobDirectories(profile: profile, auth: auth, writer: writer, jobID: jobID)
-
-                try Task.checkCancellation()
-                try await self.processFilesSequentially(profile: profile, auth: auth, writer: writer, jobID: jobID)
-
-                try Task.checkCancellation()
-                if !profile.keepRemoteFiles {
-                    try await self.cleanupRemoteFiles(profile: profile, auth: auth, writer: writer, jobID: jobID)
-                }
-
-                try self.finishJob(jobID: jobID)
+                try await executeJobPipeline(profile: profile, jobID: jobID)
             } catch is CancellationError {
-                self.markJobCancelled(jobID: jobID, writer: writer)
+                markJobCancelled(jobID: jobID, writer: nil)
             } catch {
-                if self.isCancelling {
-                    self.markJobCancelled(jobID: jobID, writer: writer)
-                } else {
-                    self.appendLog("Job failed: \(error.localizedDescription)", writer: writer)
-                    do {
-                        try self.transitionJobStep(jobID: jobID, to: .failed, writer: writer) { mutable in
-                            mutable.errorMessage = error.localizedDescription
-                            mutable.activeFileId = nil
-                        }
-                    } catch {
-                        self.appendLog(error.localizedDescription, writer: writer)
-                    }
-                    self.presentBlockingError(error.localizedDescription)
-                    self.notifyCompletionIfEnabled(success: false, jobID: jobID)
-                }
+                handleJobError(error, jobID: jobID)
             }
+        }
+    }
+
+    private func executeJobPipeline(profile: ServerProfile, jobID: UUID) async throws {
+        guard let job = jobSnapshot(id: jobID) else {
+            presentBlockingError("The selected job no longer exists.")
+            return
+        }
+
+        let logURL = URL(fileURLWithPath: job.logsPath)
+        let writer = LogWriter(fileURL: logURL)
+        appendLog("Job started: \(job.id.uuidString)", writer: writer)
+
+        let logger = lineLogger(writer: writer)
+        let authContext: SSHAuthContext
+
+        // Setup and validation
+        try validateProfile(profile)
+        authContext = try transport.makeAuthContext(for: profile)
+        defer { authContext.cleanup() }
+
+        // Execute pipeline steps sequentially (keeping original logic but with better structure)
+        try Task.checkCancellation()
+        let home = try await transport.fetchRemoteHomeDirectory(
+            profile: profile,
+            auth: authContext,
+            writer: writer,
+            onLine: logger
+        )
+
+        let resolvedRoot = resolvedStagingRoot(profile: profile, homeDirectory: home)
+        mutateJob(id: jobID) { mutable in
+            mutable.remoteJobDir = "\(ensureNoTrailingSlash(resolvedRoot))/\(mutable.id.uuidString)"
+        }
+
+        try Task.checkCancellation()
+        try await preflight(profile: profile, auth: authContext, writer: writer, jobID: jobID)
+
+        try Task.checkCancellation()
+        try await ensureRemoteJobDirectories(profile: profile, auth: authContext, writer: writer, jobID: jobID)
+
+        try Task.checkCancellation()
+        try await processFilesSequentially(profile: profile, auth: authContext, writer: writer, jobID: jobID)
+
+        try Task.checkCancellation()
+        if !profile.keepRemoteFiles {
+            try await cleanupRemoteFiles(profile: profile, auth: authContext, writer: writer, jobID: jobID)
+        }
+
+        try finishJob(jobID: jobID)
+    }
+
+    private func handleJobError(_ error: Error, jobID: UUID) {
+        if isCancelling {
+            markJobCancelled(jobID: jobID, writer: nil)
+        } else {
+            appendLog("Job failed: \(error.localizedDescription)", writer: nil)
+            do {
+                try transitionJobStep(jobID: jobID, to: .failed, writer: nil) { mutable in
+                    mutable.errorMessage = error.localizedDescription
+                    mutable.activeFileId = nil
+                }
+            } catch {
+                appendLog(error.localizedDescription, writer: nil)
+            }
+            presentBlockingError(error.localizedDescription)
+            notifyCompletionIfEnabled(success: false, jobID: jobID)
         }
     }
 
@@ -385,7 +396,7 @@ final class JobRunner {
         }
     }
 
-    private func markJobCancelled(jobID: UUID, writer: LogWriter) {
+    private func markJobCancelled(jobID: UUID, writer: LogWriter?) {
         appendLog("Job cancelled.", writer: writer)
         var markedCancelled = false
         do {
@@ -518,7 +529,9 @@ final class JobRunner {
                         throw CancellationError()
                     }
                     let message = "Upload failed for \(current.filename): \(error.localizedDescription)"
-                    appendLog(message, writer: writer)
+                    Task { @MainActor in
+                        self.appendLog(message, writer: writer)
+                    }
                     updateFile(jobID: jobID, id: current.id) {
                         $0.status = .failed
                         $0.errorMessage = message
@@ -909,10 +922,11 @@ final class JobRunner {
     }
 
     private func appendLog(_ message: String, writer: LogWriter?) {
-        let line = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let line = message.trimmed
         guard !line.isEmpty else { return }
 
-        logLines.append(line)
+        logLineCounter += 1
+        logLines.append(IdentifiedLogLine(id: logLineCounter, text: line))
         if logLines.count > 1000 {
             logLines = Array(logLines.suffix(1000))
         }
@@ -1039,15 +1053,19 @@ final class JobRunner {
         inlineStatusMessage = message
     }
 
-    private func readLogLines(atPath path: String) -> [String] {
+    private func readLogLines(atPath path: String) -> [IdentifiedLogLine] {
         guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
             return []
         }
 
-        return contents
+        let lines = contents
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map { $0.replacingOccurrences(of: "\r", with: "") }
             .filter { !$0.isEmpty }
             .suffix(1000)
+            
+        return lines.enumerated().map { index, text in
+            IdentifiedLogLine(id: index, text: String(text))
+        }
     }
 }

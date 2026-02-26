@@ -165,8 +165,6 @@ struct ProfileEditorView: View {
     }
 
     private func saveAndClose() {
-        profile.bwLimitKBps = nil
-
         onSave(
             profile,
             password,

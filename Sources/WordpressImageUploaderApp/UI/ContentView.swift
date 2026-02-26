@@ -164,6 +164,11 @@ struct ContentView: View {
     @State private var rightPane: WorkspaceOperationsTab?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var runtimeAnchors: [UUID: JobRuntimeAnchor] = [:]
+    
+    // Window state persistence
+    @AppStorage(WorkspaceLayoutState.showProfilesDrawerKey) private var showProfilesDrawer = WorkspaceLayoutState.defaultShowProfilesDrawer
+    @AppStorage(WorkspaceLayoutState.showOperationsDrawerKey) private var showOperationsDrawer = WorkspaceLayoutState.defaultShowOperationsDrawer
+    @AppStorage(WorkspaceLayoutState.operationsTabKey) private var operationsTabRawValue = WorkspaceLayoutState.defaultOperationsTab.rawValue
 
     private var selectedProfile: ServerProfile? {
         guard let selectedProfileId else { return nil }
@@ -179,11 +184,11 @@ struct ContentView: View {
     }
 
     private var isProfilesDrawerVisible: Bool {
-        WorkspaceLayoutState.profilesDrawerVisible(for: splitViewVisibility)
+        showProfilesDrawer && WorkspaceLayoutState.profilesDrawerVisible(for: splitViewVisibility)
     }
 
     private var isOperationsDrawerVisible: Bool {
-        rightPane != nil
+        showOperationsDrawer
     }
 
     private var activeOperationsTab: WorkspaceOperationsTab {
@@ -192,15 +197,15 @@ struct ContentView: View {
 
     private var profilesDrawerSceneBinding: Binding<Bool> {
         Binding(
-            get: { isProfilesDrawerVisible },
-            set: { setProfilesDrawerVisible($0) }
+            get: { showProfilesDrawer },
+            set: { showProfilesDrawer = $0 }
         )
     }
 
     private var operationsDrawerSceneBinding: Binding<Bool> {
         Binding(
-            get: { isOperationsDrawerVisible },
-            set: { setOperationsDrawerVisible($0) }
+            get: { showOperationsDrawer },
+            set: { showOperationsDrawer = $0 }
         )
     }
 
@@ -282,8 +287,9 @@ struct ContentView: View {
     private var workspaceLifecycleLayer: some View {
         workspaceContainer
             .onAppear {
-                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: true)
-                rightPane = rightPane ?? .activeJob
+                // Restore window state from persistent storage
+                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: showProfilesDrawer)
+                rightPane = showOperationsDrawer ? WorkspaceLayoutState.restoredOperationsTab(from: operationsTabRawValue) : nil
                 ingestExternalFilesIfPreferredWindow()
                 seedRuntimeAnchorForActiveJob(force: true)
                 if selectedProfileId == nil {
@@ -311,6 +317,12 @@ struct ContentView: View {
             .onChange(of: jobRunner.currentJob?.step) { _, step in
                 guard step == .preflight else { return }
                 seedRuntimeAnchorForActiveJob(force: true)
+            }
+            .onChange(of: showProfilesDrawer) { _, isVisible in
+                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: isVisible)
+            }
+            .onChange(of: splitViewVisibility) { _, visibility in
+                showProfilesDrawer = WorkspaceLayoutState.profilesDrawerVisible(for: visibility)
             }
             .onChange(of: profileStore.profiles.map(\.id)) { _, ids in
                 if let selectedProfileId, !ids.contains(selectedProfileId) {
@@ -519,7 +531,7 @@ struct ContentView: View {
             Spacer()
 
             Button {
-                setOperationsDrawerVisible(!isOperationsDrawerVisible)
+                setOperationsDrawerVisible(!showOperationsDrawer)
             } label: {
                 Label("Toggle Inspector", systemImage: "sidebar.right")
             }
@@ -635,44 +647,23 @@ struct ContentView: View {
     }
 
     private var terminalContent: some View {
-        let bottomID = "log-bottom"
-
         return Group {
             if jobRunner.logLines.isEmpty {
                 operationsEmptyState("No job selected")
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(jobRunner.logLines.suffix(Self.visibleLogLineLimit).enumerated()), id: \.offset) { _, line in
-                                Text(line)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .textSelection(.enabled)
-                            }
-                            Color.clear
-                                .frame(height: 1)
-                                .id(bottomID)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
-                    }
-                    .onAppear {
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(jobRunner.logLines.suffix(Self.visibleLogLineLimit)) { entry in
+                            Text(entry.text)
+                                .font(.system(size: 10, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
                         }
                     }
-                    .onChange(of: jobRunner.logLines.count) { _, _ in
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: jobRunner.currentJob?.id) { _, _ in
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
-                        }
-                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
                 }
+                .defaultScrollAnchor(.bottom)
             }
         }
         .frame(minHeight: 80)
@@ -817,7 +808,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                         Text("Drop photos here")
                             .font(.headline)
-                        Text("JPG, JPEG, JPE, GIF, PNG, BMP, ICO, WebP, AVIF, HEIC, PDF")
+                        Text(supportedImageExtensions.sorted().map { $0.uppercased() }.joined(separator: ", "))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button("Browse…") { choosePhotos() }
@@ -1229,26 +1220,26 @@ struct ContentView: View {
     // MARK: - Helpers
 
     private func setProfilesDrawerVisible(_ isVisible: Bool) {
-        let targetVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: isVisible)
-        guard splitViewVisibility != targetVisibility else { return }
+        guard showProfilesDrawer != isVisible else { return }
 
         withAnimation(drawerTransitionAnimation) {
-            splitViewVisibility = targetVisibility
+            showProfilesDrawer = isVisible
         }
     }
 
     private func setOperationsDrawerVisible(_ isVisible: Bool) {
-        let targetPane: WorkspaceOperationsTab? = isVisible ? activeOperationsTab : nil
-        guard rightPane != targetPane else { return }
+        guard showOperationsDrawer != isVisible else { return }
 
         withAnimation(drawerTransitionAnimation) {
-            rightPane = targetPane
+            showOperationsDrawer = isVisible
         }
     }
 
     private func selectOperationsPane(_ tab: WorkspaceOperationsTab) {
         withAnimation(drawerTransitionAnimation) {
             rightPane = tab
+            operationsTabRawValue = tab.rawValue
+            showOperationsDrawer = true
         }
     }
 
@@ -1415,6 +1406,7 @@ struct ContentView: View {
     private func copyVisibleLog() {
         let text = jobRunner.logLines
             .suffix(Self.visibleLogLineLimit)
+            .map { $0.text }
             .joined(separator: "\n")
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()

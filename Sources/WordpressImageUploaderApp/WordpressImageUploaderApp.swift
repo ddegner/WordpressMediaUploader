@@ -147,7 +147,7 @@ struct WordpressMediaUploaderApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 1180, height: 760)
+        .defaultSize(width: WorkspaceLayoutState.defaultWindowSize.width, height: WorkspaceLayoutState.defaultWindowSize.height)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About \(appDisplayName)") {

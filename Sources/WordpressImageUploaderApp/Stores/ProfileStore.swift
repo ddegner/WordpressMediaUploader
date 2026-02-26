@@ -153,6 +153,6 @@ final class ProfileStore {
     }
 
     private func trimmed(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
+        value.trimmed
     }
 }

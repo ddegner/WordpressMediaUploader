@@ -28,10 +28,12 @@ enum WorkspaceLayoutState {
     static let showProfilesDrawerKey = "workspace.showProfilesDrawer"
     static let showOperationsDrawerKey = "workspace.showOperationsDrawer"
     static let operationsTabKey = "workspace.operationsTab"
+    static let windowSizeKey = "workspace.windowSize"
 
     static let defaultShowProfilesDrawer = true
     static let defaultShowOperationsDrawer = true
     static let defaultOperationsTab: WorkspaceOperationsTab = .activeJob
+    static let defaultWindowSize = CGSize(width: 1180, height: 760)
 
     static func restoredOperationsTab(from rawValue: String) -> WorkspaceOperationsTab {
         WorkspaceOperationsTab(rawValue: rawValue) ?? defaultOperationsTab

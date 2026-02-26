@@ -36,8 +36,7 @@ enum CommandRunnerError: Error, LocalizedError {
     }
 }
 
-private final class OutputCollector: @unchecked Sendable {
-    private let lock = NSLock()
+private actor OutputCollector {
     private var stdoutBuffer = ""
     private var stderrBuffer = ""
     private var stdoutLines: [String] = []
@@ -52,42 +51,47 @@ private final class OutputCollector: @unchecked Sendable {
     func consume(stream: CommandOutputStream, data: Data) {
         guard !data.isEmpty else { return }
 
-        var linesToEmit: [(CommandOutputStream, String)] = []
-
-        lock.lock()
         let chunk = String(decoding: data, as: UTF8.self)
+        let linesToEmit: [(CommandOutputStream, String)]
+        
         switch stream {
         case .stdout:
             stdoutBuffer.append(chunk)
+            var lines: [(CommandOutputStream, String)] = []
             while let range = stdoutBuffer.range(of: "\n") {
                 let line = String(stdoutBuffer[..<range.lowerBound]).trimmingCharacters(in: .newlines)
                 stdoutBuffer = String(stdoutBuffer[range.upperBound...])
                 if !line.isEmpty {
                     stdoutLines.append(line)
-                    linesToEmit.append((.stdout, line))
+                    lines.append((.stdout, line))
                 }
             }
+            linesToEmit = lines
         case .stderr:
             stderrBuffer.append(chunk)
+            var lines: [(CommandOutputStream, String)] = []
             while let range = stderrBuffer.range(of: "\n") {
                 let line = String(stderrBuffer[..<range.lowerBound]).trimmingCharacters(in: .newlines)
                 stderrBuffer = String(stderrBuffer[range.upperBound...])
                 if !line.isEmpty {
                     stderrLines.append(line)
-                    linesToEmit.append((.stderr, line))
+                    lines.append((.stderr, line))
                 }
             }
+            linesToEmit = lines
         }
-        lock.unlock()
 
-        for (stream, line) in linesToEmit {
-            onLine?(stream, line)
+        // Emit lines outside of the actor to avoid potential deadlocks
+        Task {
+            for (stream, line) in linesToEmit {
+                onLine?(stream, line)
+            }
         }
     }
 
     func finalize() -> (stdout: [String], stderr: [String]) {
         var linesToEmit: [(CommandOutputStream, String)] = []
-        lock.lock()
+        
         let stdoutTail = stdoutBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         if !stdoutTail.isEmpty {
             stdoutLines.append(stdoutTail)
@@ -103,11 +107,14 @@ private final class OutputCollector: @unchecked Sendable {
         }
 
         let result = (stdoutLines, stderrLines)
-        lock.unlock()
 
-        for (stream, line) in linesToEmit {
-            onLine?(stream, line)
+        // Emit lines outside of the actor to avoid potential deadlocks
+        Task {
+            for (stream, line) in linesToEmit {
+                onLine?(stream, line)
+            }
         }
+        
         return result
     }
 }
@@ -136,28 +143,42 @@ actor CommandRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        let collector = OutputCollector(onLine: onLine)
-
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-                return
-            }
-            collector.consume(stream: .stdout, data: data)
+        let stdoutHandle = stdoutPipe.fileHandleForReading
+        let stderrHandle = stderrPipe.fileHandleForReading
+        
+        // Ensure file handles are always closed
+        defer {
+            try? stdoutHandle.close()
+            try? stderrHandle.close()
         }
 
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+        let collector = OutputCollector(onLine: onLine)
+
+        stdoutHandle.readabilityHandler = { handle in
             let data = handle.availableData
             if data.isEmpty {
                 handle.readabilityHandler = nil
                 return
             }
-            collector.consume(stream: .stderr, data: data)
+            Task {
+                await collector.consume(stream: .stdout, data: data)
+            }
+        }
+
+        stderrHandle.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
+            Task {
+                await collector.consume(stream: .stderr, data: data)
+            }
         }
 
         let processID = ObjectIdentifier(process)
         activeProcesses[processID] = process
+        defer { activeProcesses[processID] = nil }
 
         var launchError: String?
         let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
@@ -173,21 +194,21 @@ actor CommandRunner {
             }
         }
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-        activeProcesses[processID] = nil
+        // Clear handlers before checking exit code or reading remaining data
+        stdoutHandle.readabilityHandler = nil
+        stderrHandle.readabilityHandler = nil
 
         if exitCode == Int32.min {
             throw CommandRunnerError.launchFailed(launchError ?? spec.displayName)
         }
 
         // Drain any remaining data that arrived after readabilityHandler was cleared
-        let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let remainingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        collector.consume(stream: .stdout, data: remainingStdout)
-        collector.consume(stream: .stderr, data: remainingStderr)
+        let remainingStdout = stdoutHandle.readDataToEndOfFile()
+        let remainingStderr = stderrHandle.readDataToEndOfFile()
+        await collector.consume(stream: .stdout, data: remainingStdout)
+        await collector.consume(stream: .stderr, data: remainingStderr)
 
-        let lines = collector.finalize()
+        let lines = await collector.finalize()
         return CommandResult(exitCode: exitCode, stdoutLines: lines.stdout, stderrLines: lines.stderr)
     }
 

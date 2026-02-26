@@ -21,7 +21,6 @@ final class SSHTransport {
     private let commandRunner = CommandRunner()
     private let profileStore: ProfileStore
     private var knownHostsPathCache: String?
-    private var didCleanupStaleAskPassScripts = false
 
     init(profileStore: ProfileStore) {
         self.profileStore = profileStore
@@ -42,8 +41,7 @@ final class SSHTransport {
     }
 
     private func cleanupStaleAskPassScriptsIfNeeded() {
-        guard !didCleanupStaleAskPassScripts else { return }
-        didCleanupStaleAskPassScripts = true
+        // Always clean up stale scripts - small performance cost for better reliability
         cleanupStaleAskPassScripts()
     }
 
