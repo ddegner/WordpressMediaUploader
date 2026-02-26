@@ -81,7 +81,7 @@ final class SSHTransport {
         case .sshKey:
             var args: [String] = []
             if let keyPath = profile.keyPath,
-               !keyPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+               !keyPath.trimmed.isEmpty
             {
                 args += ["-i", keyPath]
             }
@@ -308,7 +308,8 @@ final class SSHTransport {
 
     // MARK: - Private helpers
 
-    func sshBaseArgs(profile: ServerProfile, auth: SSHAuthContext) -> [String] {
+    /// Shared SSH connection options used by both direct SSH invocations and rsync's -e transport.
+    private func sshConnectionOptions(profile: ServerProfile, auth: SSHAuthContext) -> [String] {
         var args = [
             "-p", "\(profile.port)",
             "-o", "StrictHostKeyChecking=accept-new",
@@ -319,23 +320,17 @@ final class SSHTransport {
             args += ["-o", "UserKnownHostsFile=\(knownHostsPath)"]
         }
         args += auth.additionalSSHArgs
-        args.append("\(profile.username)@\(profile.host)")
         return args
     }
 
+    func sshBaseArgs(profile: ServerProfile, auth: SSHAuthContext) -> [String] {
+        sshConnectionOptions(profile: profile, auth: auth) + ["\(profile.username)@\(profile.host)"]
+    }
+
     private func rsyncSSHTransport(profile: ServerProfile, auth: SSHAuthContext) -> String {
-        var parts = [
-            "ssh",
-            "-p", "\(profile.port)",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=10",
-            "-o", "ConnectionAttempts=1"
-        ]
-        if let knownHostsPath = knownHostsPath() {
-            parts += ["-o", "UserKnownHostsFile=\(knownHostsPath)"]
-        }
-        parts += auth.additionalSSHArgs
-        return parts.map(shellSingleQuote).joined(separator: " ")
+        (["ssh"] + sshConnectionOptions(profile: profile, auth: auth))
+            .map(shellSingleQuote)
+            .joined(separator: " ")
     }
 
     private enum RsyncProgressMode {

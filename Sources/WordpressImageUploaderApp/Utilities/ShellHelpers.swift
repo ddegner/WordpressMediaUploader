@@ -1,5 +1,15 @@
 import Foundation
 
+extension String {
+    var trimmed: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+let supportedImageExtensions: Set<String> = [
+    "jpg", "jpeg", "jpe", "gif", "png", "bmp", "ico", "webp", "avif", "heic", "pdf"
+]
+
 func shellSingleQuote(_ value: String) -> String {
     if value.isEmpty {
         return "''"
@@ -7,7 +17,6 @@ func shellSingleQuote(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
 }
-
 
 func ensureNoTrailingSlash(_ value: String) -> String {
     guard value.count > 1 else { return value }
@@ -18,8 +27,7 @@ func ensureNoTrailingSlash(_ value: String) -> String {
 }
 
 func isSupportedImageExtension(_ url: URL) -> Bool {
-    let allowed = Set(["jpg", "jpeg", "jpe", "gif", "png", "bmp", "ico", "webp", "avif", "heic", "pdf"])
-    return allowed.contains(url.pathExtension.lowercased())
+    supportedImageExtensions.contains(url.pathExtension.lowercased())
 }
 
 func parseRsyncProgress(_ line: String) -> Double? {

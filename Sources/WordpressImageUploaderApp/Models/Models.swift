@@ -28,7 +28,6 @@ struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
     var passwordKeychainId: String?
     var wpRootPath: String
     var remoteStagingRoot: String
-    var bwLimitKBps: Int?
     var keepRemoteFiles: Bool
 
     static let `default` = ServerProfile(
@@ -43,7 +42,6 @@ struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
         passwordKeychainId: nil,
         wpRootPath: "",
         remoteStagingRoot: "~/wp-media-import",
-        bwLimitKBps: nil,
         keepRemoteFiles: false
     )
 }

@@ -43,8 +43,13 @@ final class JobRunner {
     private static let connectionTestTimeoutSeconds: UInt64 = 45
     private static let longCommandHeartbeatSeconds: UInt64 = 20
 
+    struct IdentifiedLogLine: Identifiable {
+        let id: Int
+        let text: String
+    }
+
     var currentJob: Job?
-    var logLines: [String] = []
+    var logLines: [IdentifiedLogLine] = []
     var isRunning = false
     var blockingError: String?
     var inlineStatusMessage: String?
@@ -56,6 +61,7 @@ final class JobRunner {
     private var activeTask: Task<Void, Never>?
     private var activeRunJobID: UUID?
     private var isCancelling = false
+    private var logLineCounter = 0
 
     static func requestCompletionNotificationAuthorizationIfNeeded() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
@@ -249,8 +255,6 @@ final class JobRunner {
             authContext = auth
 
             let home = try await transport.fetchRemoteHomeDirectory(profile: profile, auth: auth, writer: nil)
-
-            _ = try await transport.runSSH(profile: profile, auth: auth, remoteCommand: "uname -a", writer: nil)
             checks.append("SSH OK")
 
             try await transport.runPreflightChecks(profile: profile, auth: auth, writer: nil)
@@ -912,7 +916,8 @@ final class JobRunner {
         let line = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return }
 
-        logLines.append(line)
+        logLineCounter += 1
+        logLines.append(IdentifiedLogLine(id: logLineCounter, text: line))
         if logLines.count > 1000 {
             logLines = Array(logLines.suffix(1000))
         }
@@ -1039,15 +1044,23 @@ final class JobRunner {
         inlineStatusMessage = message
     }
 
-    private func readLogLines(atPath path: String) -> [String] {
+    private func readLogLines(atPath path: String) -> [IdentifiedLogLine] {
         guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
             return []
         }
 
-        return contents
+        let rawLines = contents
             .split(separator: "\n", omittingEmptySubsequences: true)
-            .map { $0.replacingOccurrences(of: "\r", with: "") }
-            .filter { !$0.isEmpty }
             .suffix(1000)
+
+        var result: [IdentifiedLogLine] = []
+        result.reserveCapacity(rawLines.count)
+        for line in rawLines {
+            let cleaned = line.replacingOccurrences(of: "\r", with: "")
+            guard !cleaned.isEmpty else { continue }
+            logLineCounter += 1
+            result.append(IdentifiedLogLine(id: logLineCounter, text: cleaned))
+        }
+        return result
     }
 }

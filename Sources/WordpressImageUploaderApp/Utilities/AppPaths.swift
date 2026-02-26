@@ -4,7 +4,7 @@ enum AppPaths {
     static let appFolderName = "WPMediaUploader"
     private static let legacyAppFolderName = "WordpressMediaUploader"
 
-    static var appSupportDirectory: URL {
+    private static let _appSupportDirectory: URL = {
         let fm = FileManager.default
         let base =
             fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -32,7 +32,9 @@ enum AppPaths {
 
         ensureDirectory(preferredDir)
         return preferredDir
-    }
+    }()
+
+    static var appSupportDirectory: URL { _appSupportDirectory }
 
     static var profilesFile: URL {
         appSupportDirectory.appendingPathComponent("profiles.json", isDirectory: false)

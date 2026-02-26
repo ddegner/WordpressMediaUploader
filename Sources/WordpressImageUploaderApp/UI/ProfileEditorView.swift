@@ -94,7 +94,7 @@ struct ProfileEditorView: View {
                 HStack {
                     TextField("Optional", text: Binding(
                         get: { profile.keyPath ?? "" },
-                        set: { profile.keyPath = trimmed($0).isEmpty ? nil : $0 }
+                        set: { profile.keyPath = $0.trimmed.isEmpty ? nil : $0 }
                     ))
                     .font(.body.monospaced())
 
@@ -165,8 +165,6 @@ struct ProfileEditorView: View {
     }
 
     private func saveAndClose() {
-        profile.bwLimitKBps = nil
-
         onSave(
             profile,
             password,
@@ -200,7 +198,4 @@ struct ProfileEditorView: View {
         }
     }
 
-    private func trimmed(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }

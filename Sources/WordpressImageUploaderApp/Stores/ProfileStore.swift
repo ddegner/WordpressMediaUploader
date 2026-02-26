@@ -18,51 +18,38 @@ final class ProfileStore {
         profiles.isEmpty
     }
 
-    func update(_ profile: ServerProfile) {
-        guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
-        profiles[idx] = profile
-        save()
-    }
-
-    func add(_ profile: ServerProfile) {
-        guard !profiles.contains(where: { $0.id == profile.id }) else {
-            update(profile)
-            return
-        }
-        profiles.append(profile)
-        save()
-    }
-
     @discardableResult
     func upsertProfile(
         _ profile: ServerProfile,
         password: String,
         keyPassphrase: String
     ) throws -> ServerProfile {
-        if profiles.contains(where: { $0.id == profile.id }) {
-            update(profile)
-        } else {
-            add(profile)
-        }
+        var stored = profile
 
-        var storedProfile = profile
         if profile.authType == .password {
-            storedProfile = try clearKeyPassphrase(for: storedProfile)
-            if trimmed(password).isEmpty {
-                storedProfile = try clearPassword(for: storedProfile)
+            stored = try applyKeyPassphraseClear(for: stored)
+            if password.trimmed.isEmpty {
+                stored = try applyPasswordClear(for: stored)
             } else {
-                storedProfile = try savePassword(password, for: storedProfile)
+                stored = try applyPasswordSave(password, for: stored)
             }
         } else {
-            storedProfile = try clearPassword(for: storedProfile)
+            stored = try applyPasswordClear(for: stored)
             if keyPassphrase.isEmpty {
-                storedProfile = try clearKeyPassphrase(for: storedProfile)
+                stored = try applyKeyPassphraseClear(for: stored)
             } else {
-                storedProfile = try saveKeyPassphrase(keyPassphrase, for: storedProfile)
+                stored = try applyKeyPassphraseSave(keyPassphrase, for: stored)
             }
         }
 
-        return storedProfile
+        if let idx = profiles.firstIndex(where: { $0.id == stored.id }) {
+            profiles[idx] = stored
+        } else {
+            profiles.append(stored)
+        }
+        save()
+
+        return stored
     }
 
     func deleteProfile(id: UUID) {
@@ -79,46 +66,6 @@ final class ProfileStore {
         save()
     }
 
-    func savePassword(_ password: String, for profile: ServerProfile) throws -> ServerProfile {
-        let account = profile.passwordKeychainId ?? "profile-\(profile.id)-password"
-        try KeychainService.setSecret(password, account: account)
-        var updated = profile
-        updated.passwordKeychainId = account
-        update(updated)
-        return updated
-    }
-
-    func clearPassword(for profile: ServerProfile) throws -> ServerProfile {
-        guard let account = profile.passwordKeychainId else {
-            return profile
-        }
-        try KeychainService.deleteSecret(account: account)
-        var updated = profile
-        updated.passwordKeychainId = nil
-        update(updated)
-        return updated
-    }
-
-    func saveKeyPassphrase(_ passphrase: String, for profile: ServerProfile) throws -> ServerProfile {
-        let account = profile.keyPassphraseKeychainId ?? "profile-\(profile.id)-key-passphrase"
-        try KeychainService.setSecret(passphrase, account: account)
-        var updated = profile
-        updated.keyPassphraseKeychainId = account
-        update(updated)
-        return updated
-    }
-
-    func clearKeyPassphrase(for profile: ServerProfile) throws -> ServerProfile {
-        guard let account = profile.keyPassphraseKeychainId else {
-            return profile
-        }
-        try KeychainService.deleteSecret(account: account)
-        var updated = profile
-        updated.keyPassphraseKeychainId = nil
-        update(updated)
-        return updated
-    }
-
     func loadPassword(for profile: ServerProfile) -> String? {
         guard let account = profile.passwordKeychainId else { return nil }
         return try? KeychainService.getSecret(account: account)
@@ -128,6 +75,42 @@ final class ProfileStore {
         guard let account = profile.keyPassphraseKeychainId else { return nil }
         return try? KeychainService.getSecret(account: account)
     }
+
+    // MARK: - Credential helpers (mutate profile in memory, no disk write)
+
+    private func applyPasswordSave(_ password: String, for profile: ServerProfile) throws -> ServerProfile {
+        let account = profile.passwordKeychainId ?? "profile-\(profile.id)-password"
+        try KeychainService.setSecret(password, account: account)
+        var updated = profile
+        updated.passwordKeychainId = account
+        return updated
+    }
+
+    private func applyPasswordClear(for profile: ServerProfile) throws -> ServerProfile {
+        guard let account = profile.passwordKeychainId else { return profile }
+        try KeychainService.deleteSecret(account: account)
+        var updated = profile
+        updated.passwordKeychainId = nil
+        return updated
+    }
+
+    private func applyKeyPassphraseSave(_ passphrase: String, for profile: ServerProfile) throws -> ServerProfile {
+        let account = profile.keyPassphraseKeychainId ?? "profile-\(profile.id)-key-passphrase"
+        try KeychainService.setSecret(passphrase, account: account)
+        var updated = profile
+        updated.keyPassphraseKeychainId = account
+        return updated
+    }
+
+    private func applyKeyPassphraseClear(for profile: ServerProfile) throws -> ServerProfile {
+        guard let account = profile.keyPassphraseKeychainId else { return profile }
+        try KeychainService.deleteSecret(account: account)
+        var updated = profile
+        updated.keyPassphraseKeychainId = nil
+        return updated
+    }
+
+    // MARK: - Persistence
 
     private func save() {
         let state = ProfilesDiskState(profiles: profiles)
@@ -150,9 +133,5 @@ final class ProfileStore {
         } catch {
             profiles = []
         }
-    }
-
-    private func trimmed(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

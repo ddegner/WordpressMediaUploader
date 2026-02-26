@@ -155,11 +155,17 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.controlActiveState) private var controlActiveState
 
+    @AppStorage(WorkspaceLayoutState.showProfilesDrawerKey) private var storedShowProfilesDrawer = WorkspaceLayoutState.defaultShowProfilesDrawer
+    @AppStorage(WorkspaceLayoutState.showOperationsDrawerKey) private var storedShowOperationsDrawer = WorkspaceLayoutState.defaultShowOperationsDrawer
+    @AppStorage(WorkspaceLayoutState.operationsTabKey) private var storedOperationsTab = WorkspaceLayoutState.defaultOperationsTab.rawValue
+
     @State private var droppedFileItems: [FileItem] = []
     @State private var isDropTargeted = false
     @State private var selectedFileRowIDs: Set<String> = []
     @State private var profileEditorDraft: ProfileEditorDraft?
+    @State private var profileToDelete: ServerProfile?
     @State private var showBlockingErrorAlert = false
+    @State private var clipboardConfirmation: String?
     @State private var selectedProfileId: UUID?
     @State private var rightPane: WorkspaceOperationsTab?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
@@ -245,6 +251,24 @@ struct ContentView: View {
             .onChange(of: jobRunner.blockingError) { _, newValue in
                 showBlockingErrorAlert = newValue != nil
             }
+            .confirmationDialog(
+                "Delete Profile",
+                isPresented: Binding(
+                    get: { profileToDelete != nil },
+                    set: { if !$0 { profileToDelete = nil } }
+                ),
+                presenting: profileToDelete
+            ) { profile in
+                Button("Delete \"\(profile.name)\"", role: .destructive) {
+                    profileStore.deleteProfile(id: profile.id)
+                    profileToDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    profileToDelete = nil
+                }
+            } message: { profile in
+                Text("This will permanently remove \"\(profile.name)\" and its stored credentials.")
+            }
             .sheet(item: $profileEditorDraft) { draft in
                 ProfileEditorView(
                     profile: draft.profile,
@@ -282,8 +306,10 @@ struct ContentView: View {
     private var workspaceLifecycleLayer: some View {
         workspaceContainer
             .onAppear {
-                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: true)
-                rightPane = rightPane ?? .activeJob
+                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: storedShowProfilesDrawer)
+                rightPane = storedShowOperationsDrawer
+                    ? WorkspaceLayoutState.restoredOperationsTab(from: storedOperationsTab)
+                    : nil
                 ingestExternalFilesIfPreferredWindow()
                 seedRuntimeAnchorForActiveJob(force: true)
                 if selectedProfileId == nil {
@@ -291,6 +317,15 @@ struct ContentView: View {
                 }
                 if profileStore.isEmpty {
                     presentNewProfileEditor()
+                }
+            }
+            .onChange(of: splitViewVisibility) { _, visibility in
+                storedShowProfilesDrawer = WorkspaceLayoutState.profilesDrawerVisible(for: visibility)
+            }
+            .onChange(of: rightPane) { _, pane in
+                storedShowOperationsDrawer = pane != nil
+                if let pane {
+                    storedOperationsTab = pane.rawValue
                 }
             }
             .onChange(of: externalFileIntake.sequence) { _, _ in
@@ -635,44 +670,23 @@ struct ContentView: View {
     }
 
     private var terminalContent: some View {
-        let bottomID = "log-bottom"
-
-        return Group {
+        Group {
             if jobRunner.logLines.isEmpty {
                 operationsEmptyState("No job selected")
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(jobRunner.logLines.suffix(Self.visibleLogLineLimit).enumerated()), id: \.offset) { _, line in
-                                Text(line)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .textSelection(.enabled)
-                            }
-                            Color.clear
-                                .frame(height: 1)
-                                .id(bottomID)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
-                    }
-                    .onAppear {
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(jobRunner.logLines.suffix(Self.visibleLogLineLimit)) { entry in
+                            Text(entry.text)
+                                .font(.system(size: 10, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
                         }
                     }
-                    .onChange(of: jobRunner.logLines.count) { _, _ in
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: jobRunner.currentJob?.id) { _, _ in
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
-                        }
-                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
                 }
+                .defaultScrollAnchor(.bottom)
             }
         }
         .frame(minHeight: 80)
@@ -817,7 +831,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                         Text("Drop photos here")
                             .font(.headline)
-                        Text("JPG, JPEG, JPE, GIF, PNG, BMP, ICO, WebP, AVIF, HEIC, PDF")
+                        Text(supportedImageExtensions.sorted().map { $0.uppercased() }.joined(separator: ", "))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button("Browse…") { choosePhotos() }
@@ -1120,7 +1134,7 @@ struct ContentView: View {
 
     private var logViewer: some View {
         VStack(alignment: .leading, spacing: 0) {
-            operationsPanelHeader("TERMINAL") {
+            operationsPanelHeader(clipboardConfirmation ?? "TERMINAL", titleIsConfirmation: clipboardConfirmation != nil) {
                 Button {
                     openLogs()
                 } label: {
@@ -1180,23 +1194,27 @@ struct ContentView: View {
     }
 
     private func operationsPanelHeader(_ title: String) -> some View {
-        operationsPanelHeader(title) {
+        operationsPanelHeader(title, titleIsConfirmation: false) {
             EmptyView()
         }
     }
 
     private func operationsPanelHeader<Actions: View>(
         _ title: String,
+        titleIsConfirmation: Bool = false,
         @ViewBuilder actions: () -> Actions
     ) -> some View {
         HStack(spacing: 8) {
             Text(title)
                 .font(Self.sectionHeaderFont)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(titleIsConfirmation ? Color.green : Color.secondary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
+                .animation(.easeInOut(duration: 0.2), value: titleIsConfirmation)
             Spacer(minLength: 8)
-            actions()
+            if !titleIsConfirmation {
+                actions()
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -1282,7 +1300,7 @@ struct ContentView: View {
 
     private func deleteProfile(_ profile: ServerProfile) {
         guard !jobRunner.isRunning else { return }
-        profileStore.deleteProfile(id: profile.id)
+        profileToDelete = profile
     }
 
     private func clearJobHistory() {
@@ -1304,10 +1322,9 @@ struct ContentView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.allowedContentTypes = {
-            let extensions = ["jpg", "jpeg", "jpe", "gif", "png", "bmp", "ico", "webp", "avif", "heic", "pdf"]
             var seen = Set<String>()
             var types: [UTType] = []
-            for ext in extensions {
+            for ext in supportedImageExtensions.sorted() {
                 guard let type = UTType(filenameExtension: ext) else { continue }
                 if seen.insert(type.identifier).inserted {
                     types.append(type)
@@ -1406,19 +1423,27 @@ struct ContentView: View {
     }
 
     private func copyReport() {
-        let text = jobRunner.reportText()
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        setPasteboard(jobRunner.reportText(), confirmation: "Report copied")
+    }
+
+    private func setPasteboard(_ string: String, confirmation: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+        clipboardConfirmation = confirmation
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if clipboardConfirmation == confirmation {
+                clipboardConfirmation = nil
+            }
+        }
     }
 
     private func copyVisibleLog() {
         let text = jobRunner.logLines
             .suffix(Self.visibleLogLineLimit)
+            .map(\.text)
             .joined(separator: "\n")
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        setPasteboard(text, confirmation: "Terminal copied")
     }
 
     @MainActor

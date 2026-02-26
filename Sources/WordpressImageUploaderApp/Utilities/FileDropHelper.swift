@@ -33,23 +33,21 @@ func resolveImageFileURLs(from urls: [URL]) -> [URL] {
 }
 
 private func loadSingleURL(from provider: NSItemProvider) async -> URL? {
-    let typeIdentifier = UTType.fileURL.identifier
-
-    guard provider.hasItemConformingToTypeIdentifier(typeIdentifier) else {
+    guard provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else {
         return nil
     }
 
-    return await withCheckedContinuation { continuation in
-        provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, _ in
-            guard let data,
-                  let url = URL(dataRepresentation: data, relativeTo: nil)
-            else {
-                continuation.resume(returning: nil)
-                return
-            }
-
-            continuation.resume(returning: url)
+    do {
+        let item = try await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
+        if let url = item as? URL {
+            return url
         }
+        if let data = item as? Data {
+            return URL(dataRepresentation: data, relativeTo: nil)
+        }
+        return nil
+    } catch {
+        return nil
     }
 }
 
