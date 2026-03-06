@@ -140,9 +140,6 @@ struct WordpressMediaUploaderApp: App {
                 guard isEnabled else { return }
                 JobRunner.requestCompletionNotificationAuthorizationIfNeeded()
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                jobStore.removeActiveJobs()
-            }
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)

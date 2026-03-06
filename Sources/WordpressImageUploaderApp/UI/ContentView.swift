@@ -93,26 +93,12 @@ private struct FileThumbnailIcon: View {
     }
 }
 
-private extension Color {
-    init(hexRGB: UInt32) {
-        let red = Double((hexRGB >> 16) & 0xFF) / 255.0
-        let green = Double((hexRGB >> 8) & 0xFF) / 255.0
-        let blue = Double(hexRGB & 0xFF) / 255.0
-        self.init(.sRGB, red: red, green: green, blue: blue, opacity: 1)
-    }
-}
-
 struct ContentView: View {
     private static let profilesDrawerWidth: CGFloat = 260
-    private static let operationsDrawerWidth: CGFloat = 360
     private static let workbenchMinWidth: CGFloat = 180
-    private static let drawerTransitionDuration: TimeInterval = 0.24
     private static let visibleLogLineLimit = 300
 
-    private static let sectionHeaderFont: Font = .caption2.weight(.semibold)
     private static let editorBackground = Color(nsColor: .textBackgroundColor)
-    private static let chromeBackground = Color(nsColor: .windowBackgroundColor)
-
 
     private struct ProfileEditorDraft: Identifiable {
         let id: UUID
@@ -129,6 +115,9 @@ struct ContentView: View {
     }
 
     private struct DisplayFile: Identifiable {
+        private static let currentJobRowPrefix = "job-"
+        private static let queuedRowPrefix = "queued-"
+
         enum Source {
             case currentJob
             case queued
@@ -137,12 +126,24 @@ struct ContentView: View {
         let source: Source
         let item: FileItem
 
+        static func currentJobRowID(for id: UUID) -> String {
+            "\(currentJobRowPrefix)\(id.uuidString)"
+        }
+
+        static func queuedRowID(for id: UUID) -> String {
+            "\(queuedRowPrefix)\(id.uuidString)"
+        }
+
+        static func isQueuedRowID(_ rowID: String) -> Bool {
+            rowID.hasPrefix(queuedRowPrefix)
+        }
+
         var id: String {
             switch source {
             case .currentJob:
-                return "job-\(item.id.uuidString)"
+                return Self.currentJobRowID(for: item.id)
             case .queued:
-                return "queued-\(item.id.uuidString)"
+                return Self.queuedRowID(for: item.id)
             }
         }
     }
@@ -152,7 +153,6 @@ struct ContentView: View {
     @Bindable var jobRunner: JobRunner
     @Bindable var externalFileIntake: ExternalFileIntake
 
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.controlActiveState) private var controlActiveState
 
     @State private var droppedFileItems: [FileItem] = []
@@ -160,35 +160,28 @@ struct ContentView: View {
     @State private var selectedFileRowIDs: Set<String> = []
     @State private var profileEditorDraft: ProfileEditorDraft?
     @State private var showBlockingErrorAlert = false
+    @State private var showProfileStoreErrorAlert = false
+    @State private var showJobStoreErrorAlert = false
     @State private var selectedProfileId: UUID?
-    @State private var rightPane: WorkspaceOperationsTab?
-    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var runtimeAnchors: [UUID: JobRuntimeAnchor] = [:]
-    
-    // Window state persistence
-    @AppStorage(WorkspaceLayoutState.showProfilesDrawerKey) private var showProfilesDrawer = WorkspaceLayoutState.defaultShowProfilesDrawer
-    @AppStorage(WorkspaceLayoutState.showOperationsDrawerKey) private var showOperationsDrawer = WorkspaceLayoutState.defaultShowOperationsDrawer
-    @AppStorage(WorkspaceLayoutState.operationsTabKey) private var operationsTabRawValue = WorkspaceLayoutState.defaultOperationsTab.rawValue
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var rightPane: WorkspaceOperationsTab? = .activeJob
+    @State private var profilePendingDeletion: ServerProfile?
+    @State private var showResetConfirmation = false
+    @State private var showClearHistoryConfirmation = false
+
 
     private var selectedProfile: ServerProfile? {
         guard let selectedProfileId else { return nil }
         return profileStore.profiles.first { $0.id == selectedProfileId }
     }
 
-    private var drawerTransitionTime: TimeInterval {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : Self.drawerTransitionDuration
-    }
-
-    private var drawerTransitionAnimation: Animation {
-        .easeInOut(duration: drawerTransitionTime)
-    }
-
     private var isProfilesDrawerVisible: Bool {
-        showProfilesDrawer && WorkspaceLayoutState.profilesDrawerVisible(for: splitViewVisibility)
+        WorkspaceLayoutState.profilesDrawerVisible(for: splitViewVisibility)
     }
 
     private var isOperationsDrawerVisible: Bool {
-        showOperationsDrawer
+        rightPane != nil
     }
 
     private var activeOperationsTab: WorkspaceOperationsTab {
@@ -197,15 +190,15 @@ struct ContentView: View {
 
     private var profilesDrawerSceneBinding: Binding<Bool> {
         Binding(
-            get: { showProfilesDrawer },
-            set: { showProfilesDrawer = $0 }
+            get: { isProfilesDrawerVisible },
+            set: { setProfilesDrawerVisible($0) }
         )
     }
 
     private var operationsDrawerSceneBinding: Binding<Bool> {
         Binding(
-            get: { showOperationsDrawer },
-            set: { showOperationsDrawer = $0 }
+            get: { isOperationsDrawerVisible },
+            set: { setOperationsDrawerVisible($0) }
         )
     }
 
@@ -216,40 +209,12 @@ struct ContentView: View {
         )
     }
 
-    private var visibleDrawerWidth: CGFloat {
-        (isProfilesDrawerVisible ? Self.profilesDrawerWidth : 0)
-            + (isOperationsDrawerVisible ? Self.operationsDrawerWidth : 0)
-    }
-
     private var minimumWindowWidth: CGFloat {
-        visibleDrawerWidth + Self.workbenchMinWidth
-    }
-
-    private var drawerBackground: Color {
-        switch colorScheme {
-        case .dark:
-            return Color(hexRGB: isWindowFocused ? 0x2A2A2C : 0x303033)
-        case .light:
-            return Color(hexRGB: isWindowFocused ? 0xF8F8F8 : 0xF4F4F4)
-        @unknown default:
-            return Color(hexRGB: isWindowFocused ? 0xF8F8F8 : 0xF4F4F4)
-        }
-    }
-
-    private var isWindowFocused: Bool {
-        controlActiveState != .inactive
+        (isProfilesDrawerVisible ? Self.profilesDrawerWidth : 0) + Self.workbenchMinWidth
     }
 
     var body: some View {
-        workspacePresentationLayer
-            .alert("Error", isPresented: $showBlockingErrorAlert, presenting: jobRunner.blockingError) { _ in
-                Button("OK") { jobRunner.blockingError = nil }
-            } message: { error in
-                Text(error)
-            }
-            .onChange(of: jobRunner.blockingError) { _, newValue in
-                showBlockingErrorAlert = newValue != nil
-            }
+        workspaceAlertLayer
             .sheet(item: $profileEditorDraft) { draft in
                 ProfileEditorView(
                     profile: draft.profile,
@@ -258,20 +223,71 @@ struct ContentView: View {
                     jobRunner: jobRunner
                 ) { updated, password, keyPassphrase in
                     let isNewProfile = !profileStore.profiles.contains(where: { $0.id == updated.id })
-                    if isNewProfile {
-                        selectedProfileId = updated.id
-                    }
+                    let storedProfile = try profileStore.upsertProfile(
+                        updated,
+                        password: password,
+                        keyPassphrase: keyPassphrase
+                    )
 
-                    do {
-                        _ = try profileStore.upsertProfile(
-                            updated,
-                            password: password,
-                            keyPassphrase: keyPassphrase
-                        )
-                    } catch {
-                        jobRunner.blockingError = "Failed to save credentials: \(error.localizedDescription)"
+                    if isNewProfile {
+                        selectedProfileId = storedProfile.id
                     }
                 }
+            }
+    }
+
+    private var workspaceAlertLayer: some View {
+        workspaceConfirmationLayer
+            .alert("Error", isPresented: $showBlockingErrorAlert, presenting: jobRunner.blockingError) { _ in
+                Button("OK") { jobRunner.blockingError = nil }
+            } message: { error in
+                Text(error)
+            }
+            .alert("Profile Storage Error", isPresented: $showProfileStoreErrorAlert, presenting: profileStore.lastError) { _ in
+                Button("OK") { profileStore.lastError = nil }
+            } message: { error in
+                Text(error)
+            }
+            .alert("Job History Error", isPresented: $showJobStoreErrorAlert, presenting: jobStore.lastError) { _ in
+                Button("OK") { jobStore.lastError = nil }
+            } message: { error in
+                Text(error)
+            }
+            .onChange(of: jobRunner.blockingError) { _, val in showBlockingErrorAlert = val != nil }
+            .onChange(of: profileStore.lastError) { _, val in showProfileStoreErrorAlert = val != nil }
+            .onChange(of: jobStore.lastError) { _, val in showJobStoreErrorAlert = val != nil }
+    }
+
+    private var workspaceConfirmationLayer: some View {
+        workspacePresentationLayer
+            .confirmationDialog(
+                "Delete Profile",
+                isPresented: Binding(
+                    get: { profilePendingDeletion != nil },
+                    set: { if !$0 { profilePendingDeletion = nil } }
+                ),
+                presenting: profilePendingDeletion
+            ) { profile in
+                Button("Delete \"\(profile.name)\"", role: .destructive) {
+                    profileStore.deleteProfile(id: profile.id)
+                    profilePendingDeletion = nil
+                }
+            } message: { _ in
+                Text("This will permanently remove the profile and its stored credentials.")
+            }
+            .confirmationDialog("Reset Queue", isPresented: $showResetConfirmation) {
+                Button("Reset", role: .destructive) {
+                    clearAllFiles()
+                }
+            } message: {
+                Text("This will clear all queued files and the current job.")
+            }
+            .confirmationDialog("Clear Job History", isPresented: $showClearHistoryConfirmation) {
+                Button("Clear History", role: .destructive) {
+                    jobRunner.clearJobHistory()
+                }
+            } message: {
+                Text("This will remove all completed job records.")
             }
     }
 
@@ -287,9 +303,16 @@ struct ContentView: View {
     private var workspaceLifecycleLayer: some View {
         workspaceContainer
             .onAppear {
-                // Restore window state from persistent storage
-                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: showProfilesDrawer)
-                rightPane = showOperationsDrawer ? WorkspaceLayoutState.restoredOperationsTab(from: operationsTabRawValue) : nil
+                let defaults = UserDefaults.standard
+                let showProfiles = defaults.object(forKey: WorkspaceLayoutState.showProfilesDrawerKey) as? Bool ?? true
+                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: showProfiles)
+                let showOps = defaults.object(forKey: WorkspaceLayoutState.showOperationsDrawerKey) as? Bool ?? true
+                if showOps {
+                    let tabRaw = defaults.string(forKey: WorkspaceLayoutState.operationsTabKey) ?? ""
+                    rightPane = WorkspaceOperationsTab(rawValue: tabRaw) ?? .activeJob
+                } else {
+                    rightPane = nil
+                }
                 ingestExternalFilesIfPreferredWindow()
                 seedRuntimeAnchorForActiveJob(force: true)
                 if selectedProfileId == nil {
@@ -318,12 +341,6 @@ struct ContentView: View {
                 guard step == .preflight else { return }
                 seedRuntimeAnchorForActiveJob(force: true)
             }
-            .onChange(of: showProfilesDrawer) { _, isVisible in
-                splitViewVisibility = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: isVisible)
-            }
-            .onChange(of: splitViewVisibility) { _, visibility in
-                showProfilesDrawer = WorkspaceLayoutState.profilesDrawerVisible(for: visibility)
-            }
             .onChange(of: profileStore.profiles.map(\.id)) { _, ids in
                 if let selectedProfileId, !ids.contains(selectedProfileId) {
                     self.selectedProfileId = ids.first
@@ -338,86 +355,97 @@ struct ContentView: View {
     }
 
     private var workspaceContainer: some View {
-        HStack(spacing: 0) {
-            NavigationSplitView(columnVisibility: $splitViewVisibility) {
-                sidebar
-                    .navigationSplitViewColumnWidth(
-                        min: Self.profilesDrawerWidth,
-                        ideal: Self.profilesDrawerWidth,
-                        max: Self.profilesDrawerWidth
-                    )
-                    .background(drawerBackground)
-            } detail: {
-                middleWorkbench
-                    .frame(minWidth: Self.workbenchMinWidth, maxWidth: .infinity)
-                    .background(Self.editorBackground)
-                    .toolbar {
-                        middleToolbarItems()
-                    }
-            }
-            .toolbarRole(.editor)
-            .navigationSplitViewStyle(.balanced)
-
-            if isOperationsDrawerVisible {
-                operationsDrawer
-                    .frame(width: Self.operationsDrawerWidth)
-                    .background(drawerBackground)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(
+                    min: Self.profilesDrawerWidth,
+                    ideal: Self.profilesDrawerWidth,
+                    max: Self.profilesDrawerWidth
+                )
+        } detail: {
+            middleWorkbench
+                .frame(minWidth: Self.workbenchMinWidth, maxWidth: .infinity)
+                .background(Self.editorBackground)
+                .toolbar {
+                    middleToolbarItems()
+                }
         }
-        .animation(drawerTransitionAnimation, value: isOperationsDrawerVisible)
+        .toolbarRole(.editor)
+        .navigationSplitViewStyle(.balanced)
+        .inspector(isPresented: operationsDrawerSceneBinding) {
+            operationsDrawer
+                .inspectorColumnWidth(min: 280, ideal: 340, max: 400)
+        }
     }
 
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            List(selection: $selectedProfileId) {
-                Section {
-                    ForEach(profileStore.profiles) { profile in
-                        profileSidebarRow(profile)
-                            .tag(profile.id)
-                            .contextMenu {
-                                Button("Edit Profile…") {
-                                    presentProfileEditor(for: profile)
-                                }
+        List(selection: $selectedProfileId) {
+            ForEach(profileStore.profiles) { profile in
+                profileSidebarRow(profile)
+                    .tag(profile.id)
+                    .contextMenu {
+                        Button("Edit Profile…") {
+                            presentProfileEditor(for: profile)
+                        }
 
-                                Button("Delete Profile", role: .destructive) {
-                                    deleteProfile(profile)
-                                }
-                                .disabled(!canDeleteProfile)
+                        Menu("Color") {
+                            Button {
+                                setProfileColor(nil, for: profile)
+                            } label: {
+                                Label("None", systemImage: profile.profileColorHex == nil ? "checkmark" : "circle.slash")
                             }
-                    }
-                } header: {
-                    Text("PROFILES")
-                        .font(Self.sectionHeaderFont)
-                        .foregroundStyle(.secondary)
-                        .textCase(nil)
-                }
-            }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .background(drawerBackground)
-            .environment(\.defaultMinListRowHeight, 30)
 
-            HStack(spacing: 8) {
-                paneHeaderButton(systemImage: "plus", help: "New profile") {
-                    presentNewProfileEditor()
-                }
-                paneHeaderButton(
-                    systemImage: "minus",
-                    help: "Delete selected profile",
-                    isDisabled: !canDeleteProfile
-                ) {
-                    if let selectedProfile {
-                        deleteProfile(selectedProfile)
+                            Divider()
+
+                            ForEach(ProfileColor.presets) { preset in
+                                Button {
+                                    setProfileColor(preset.hex, for: profile)
+                                } label: {
+                                    Label(preset.name, systemImage: profile.profileColorHex == preset.hex ? "checkmark.circle.fill" : "circle.fill")
+                                }
+                                .tint(Color(hexString: preset.hex))
+                            }
+                        }
+
+                        Divider()
+
+                        Button("Delete Profile", role: .destructive) {
+                            deleteProfile(profile)
+                        }
+                        .disabled(!canDeleteProfile)
                     }
+            }
+        }
+        .listStyle(.sidebar)
+        .environment(\.defaultMinListRowHeight, 30)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                ControlGroup {
+                    Button {
+                        presentNewProfileEditor()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .help("New profile")
+
+                    Button {
+                        if let selectedProfile {
+                            deleteProfile(selectedProfile)
+                        }
+                    } label: {
+                        Image(systemName: "minus")
+                    }
+                    .help("Delete selected profile")
+                    .disabled(!canDeleteProfile)
                 }
+                .controlSize(.small)
+                .frame(width: 52)
                 Spacer()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(drawerBackground)
         }
     }
 
@@ -433,7 +461,9 @@ struct ContentView: View {
             .lineLimit(1)
         } icon: {
             Image(systemName: "server.rack")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(
+                    profile.profileColorHex.map { Color(hexString: $0) } ?? .secondary
+                )
         }
     }
 
@@ -485,7 +515,15 @@ struct ContentView: View {
 
         ToolbarItemGroup(placement: .automatic) {
             Button {
-                clearAllFiles()
+                choosePhotos()
+            } label: {
+                Label("Add Files...", systemImage: "plus")
+            }
+            .help("Choose files to queue for upload")
+            .accessibilityLabel("Add files")
+
+            Button {
+                showResetConfirmation = true
             } label: {
                 Label("Reset", systemImage: "trash")
             }
@@ -531,7 +569,7 @@ struct ContentView: View {
             Spacer()
 
             Button {
-                setOperationsDrawerVisible(!showOperationsDrawer)
+                setOperationsDrawerVisible(!isOperationsDrawerVisible)
             } label: {
                 Label("Toggle Inspector", systemImage: "sidebar.right")
             }
@@ -542,14 +580,20 @@ struct ContentView: View {
     private var toolbarProfileLabel: some View {
         Group {
             if let selectedProfile {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(selectedProfile.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text("\(selectedProfile.username)@\(selectedProfile.host)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                HStack(spacing: 8) {
+                    Image(systemName: "server.rack")
+                        .foregroundStyle(
+                            selectedProfile.profileColorHex.map { Color(hexString: $0) } ?? .secondary
+                        )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(selectedProfile.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text("\(selectedProfile.username)@\(selectedProfile.host)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 .help("\(selectedProfile.username)@\(selectedProfile.host)")
             } else if profileStore.isEmpty {
@@ -573,31 +617,20 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Picker("Operations", selection: operationsTabBinding) {
                 ForEach(WorkspaceOperationsTab.allCases) { tab in
-                    Image(systemName: tab.systemImage)
-                        .font(.system(size: 14, weight: .semibold))
-                        .imageScale(.large)
-                        .help(tab.title)
-                        .accessibilityLabel(tab.title)
+                    Label(tab.title, systemImage: tab.systemImage)
                         .tag(tab)
                 }
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
-            .padding(.horizontal, 0)
-            .padding(.top, 4)
-            .padding(.bottom, 8)
-            .background(drawerBackground)
+            .controlSize(.regular)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
             Group {
                 switch activeOperationsTab {
                 case .activeJob:
-                    VStack(spacing: 0) {
-                        operationsProgressPanel
-                        Spacer(minLength: 0)
-                    }
+                    operationsProgressPanel
                 case .terminal:
                     logViewer
                 case .history:
@@ -606,48 +639,25 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(drawerBackground)
     }
 
     private var operationsProgressPanel: some View {
-        VStack(spacing: 0) {
-            operationsPanelHeader("ACTIVE JOB")
-
+        Group {
             if let job = jobRunner.currentJob {
-                VStack(alignment: .leading, spacing: 8) {
-                    jobStatusHeader(job: job)
-
-                    if let message = operationsInlineMessage {
-                        inlineMessageRow(message: message)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                jobStatusForm(job: job)
             } else {
                 operationsEmptyState("No job selected")
             }
         }
-        .background(drawerBackground)
     }
 
     private func operationsEmptyState(_ message: String) -> some View {
-        VStack {
-            Spacer(minLength: 0)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(drawerBackground)
+        ContentUnavailableView(message, systemImage: "tray")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var terminalContent: some View {
-        return Group {
+        Group {
             if jobRunner.logLines.isEmpty {
                 operationsEmptyState("No job selected")
             } else {
@@ -667,7 +677,6 @@ struct ContentView: View {
             }
         }
         .frame(minHeight: 80)
-        .background(drawerBackground)
     }
 
     private var operationsInlineMessage: String? {
@@ -710,50 +719,47 @@ struct ContentView: View {
 
     private var jobHistoryView: some View {
         VStack(spacing: 0) {
-            operationsPanelHeader("RECENT JOBS") {
-                Button {
-                    clearJobHistory()
-                } label: {
-                    Image(systemName: "trash")
+            HStack {
+                Text("Recent Jobs")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear", systemImage: "trash") {
+                    showClearHistoryConfirmation = true
                 }
                 .buttonStyle(.borderless)
-                .font(.caption)
                 .controlSize(.small)
-                .help("Clear job history")
-                .accessibilityLabel("Clear Job History")
                 .disabled(!canClearJobHistory)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
 
             if selectedProfileJobs.isEmpty {
                 operationsEmptyState("No jobs yet")
             } else {
-                List {
-                    ForEach(Array(selectedProfileJobs.prefix(50))) { job in
-                        Button {
-                            jobRunner.loadJob(job)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(job.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.callout)
-                                HStack(spacing: 4) {
-                                    statusDot(for: job.step)
-                                    Text(stepTitle(job.step))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text("• \(job.localFiles.count) files")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                }
+                List(selectedProfileJobs.prefix(50)) { job in
+                    Button {
+                        jobRunner.loadJob(job)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(job.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.callout)
+                            HStack(spacing: 4) {
+                                statusDot(for: job.step)
+                                Text(stepTitle(job.step))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("• \(job.localFiles.count) files")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
                             }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(jobRunner.isRunning)
-                        .padding(.vertical, 1)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(jobRunner.isRunning)
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: false))
                 .scrollContentBackground(.hidden)
-                .background(drawerBackground)
             }
         }
     }
@@ -761,74 +767,66 @@ struct ContentView: View {
     // MARK: - Image Queue
 
     private var filesArea: some View {
-        let files = filesForDisplay()
+        let job = jobRunner.currentJob
+        let currentJobFiles = job?.localFiles.map { DisplayFile(source: .currentJob, item: $0) } ?? []
         return VStack(spacing: 0) {
             ZStack {
-                List(selection: $selectedFileRowIDs) {
-                    ForEach(files) { file in
-                        fileRow(for: file, job: jobRunner.currentJob)
-                            .tag(file.id)
-                            .contextMenu {
-                                if file.source == .queued {
-                                    Button("Delete") {
-                                        deleteFileRows(targeting: file)
-                                    }
-                                    .disabled(jobRunner.isRunning)
-                                }
-                            }
-                    }
-                }
-                .listStyle(.inset(alternatesRowBackgrounds: false))
-                .scrollContentBackground(.hidden)
-                .background(Self.editorBackground)
-                .overlay {
-                    if isDropTargeted {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                            .padding(8)
-                    }
-                }
-                .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
-                    Task {
-                        let urls = await loadFileURLs(from: providers)
-                        await MainActor.run {
-                            addFiles(urls)
+                fileList(currentJobFiles: currentJobFiles, job: job)
+                    .overlay {
+                        if isDropTargeted {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(Color.accentColor.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                .padding(8)
                         }
                     }
-                    return true
-                }
-                .onDeleteCommand {
-                    deleteSelectedFileRows()
-                }
-
-                if files.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 28))
-                            .foregroundStyle(.secondary)
-                        Text("Drop photos here")
-                            .font(.headline)
-                        Text(supportedImageExtensions.sorted().map { $0.uppercased() }.joined(separator: ", "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button("Browse…") { choosePhotos() }
-                            .buttonStyle(.link)
-                            .font(.caption)
+                    .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+                        Task {
+                            let urls = await loadFileURLs(from: providers)
+                            await MainActor.run {
+                                addFiles(urls)
+                            }
+                        }
+                        return true
                     }
-                    .padding(24)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Self.chromeBackground.opacity(0.9))
-                    )
-                }
+                    .onDeleteCommand {
+                        deleteSelectedFileRows()
+                    }
             }
         }
         .onChange(of: droppedFileItems) { _, _ in
             pruneFileSelection()
         }
-        .onChange(of: jobRunner.currentJob?.id) { _, _ in
+        .onChange(of: job?.id) { _, _ in
             pruneFileSelection()
         }
+    }
+
+    private func fileList(currentJobFiles: [DisplayFile], job: Job?) -> some View {
+        List(selection: $selectedFileRowIDs) {
+            ForEach(currentJobFiles) { file in
+                fileRow(for: file, job: job)
+                    .tag(file.id)
+            }
+
+            ForEach(droppedFileItems) { item in
+                let file = DisplayFile(source: .queued, item: item)
+                fileRow(for: file, job: job)
+                    .tag(file.id)
+                    .contextMenu {
+                        Button("Delete") {
+                            deleteFileRows(targeting: file)
+                        }
+                        .disabled(jobRunner.isRunning)
+                    }
+            }
+            .onMove { source, destination in
+                guard !jobRunner.isRunning else { return }
+                moveQueuedFiles(from: source, to: destination)
+            }
+        }
+        .listStyle(.inset(alternatesRowBackgrounds: false))
+        .scrollContentBackground(.hidden)
+        .background(Self.editorBackground)
     }
 
     private var canClearFiles: Bool {
@@ -856,9 +854,7 @@ struct ContentView: View {
     }
 
     private var canDeleteSelectedFilesAction: Bool {
-        let hasQueuedSelection = filesForDisplay().contains {
-            selectedFileRowIDs.contains($0.id) && $0.source == .queued
-        }
+        let hasQueuedSelection = selectedFileRowIDs.contains(where: DisplayFile.isQueuedRowID)
         return WorkspaceCommandState.canDeleteSelectedFiles(
             isRunning: jobRunner.isRunning,
             selectedCount: selectedFileRowIDs.count,
@@ -887,7 +883,7 @@ struct ContentView: View {
             },
             addFiles: choosePhotos,
             deleteSelectedFiles: deleteSelectedFileRows,
-            resetQueueAndCurrentJob: clearAllFiles,
+            resetQueueAndCurrentJob: { showResetConfirmation = true },
             retryFailedFiles: {
                 guard let profile = retryProfile else { return }
                 jobRunner.retryFailed(profile: profile)
@@ -896,7 +892,7 @@ struct ContentView: View {
                 jobRunner.cancel()
             },
             startUpload: startQueuedUpload,
-            clearJobHistory: clearJobHistory,
+            clearJobHistory: { showClearHistoryConfirmation = true },
             openLog: openLogs,
             copyVisibleLog: copyVisibleLog,
             copyReport: copyReport,
@@ -931,15 +927,6 @@ struct ContentView: View {
         )
     }
 
-    private func filesForDisplay() -> [DisplayFile] {
-        var rows: [DisplayFile] = []
-        if let job = jobRunner.currentJob {
-            rows.append(contentsOf: job.localFiles.map { DisplayFile(source: .currentJob, item: $0) })
-        }
-        rows.append(contentsOf: droppedFileItems.map { DisplayFile(source: .queued, item: $0) })
-        return rows
-    }
-
     private func fileRow(for file: DisplayFile, job: Job?) -> some View {
         let item = file.item
         let rowStatus = fileRowStatus(for: file, in: job)
@@ -959,6 +946,7 @@ struct ContentView: View {
                 .foregroundStyle(rowStatusColor(rowStatus))
                 .frame(width: 108, alignment: .trailing)
         }
+        .padding(.vertical, 2)
         .help(
             FileRowPresentation.helpText(
                 for: item,
@@ -1032,7 +1020,7 @@ struct ContentView: View {
     }
 
 
-    private func jobStatusHeader(job: Job) -> some View {
+    private func jobStatusForm(job: Job) -> some View {
         let presentation = JobPresentation.make(
             for: job,
             activeFileStatus: activeFileStatus(for: job),
@@ -1041,206 +1029,100 @@ struct ContentView: View {
             durationFormatter: Self.durationFormatter
         )
 
-        return VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Label(stepTitle(job.step), systemImage: stepIcon(job.step))
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(stepColor(job.step))
-                Spacer()
-                if jobRunner.isRunning {
-                    ProgressView()
-                        .controlSize(.small)
+        return Form {
+            Section {
+                HStack {
+                    Label(stepTitle(job.step), systemImage: stepIcon(job.step))
+                        .foregroundStyle(stepColor(job.step))
+                    Spacer()
+                    if jobRunner.isRunning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                ProgressView(value: presentation.overallProgress) {
+                    Text(presentation.progressLabel)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("ETA", value: presentation.etaLine)
+                LabeledContent("Rate", value: presentation.rateLine)
+
+                if let message = operationsInlineMessage {
+                    inlineMessageRow(message: message)
                 }
             }
 
-            Text(presentation.statusLine)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            HStack {
-                Text(presentation.progressLabel)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(presentation.etaLine)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-
-            ProgressView(value: presentation.overallProgress)
-
-            HStack {
-                Text(presentation.rateLine)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
-                GridRow {
-                    progressMetricLabel("Queued")
-                    progressMetricValue(presentation.queuedFiles)
-                    progressMetricLabel("Uploaded")
-                    progressMetricValue(presentation.uploadedFiles)
+            Section {
+                LabeledContent("Succeeded") {
+                    Text("\(presentation.successfulFiles)")
+                        .foregroundStyle(.green)
                 }
-                GridRow {
-                    progressMetricLabel("Verified")
-                    progressMetricValue(presentation.verifiedFiles)
-                    progressMetricLabel("Imported")
-                    progressMetricValue(presentation.importedFiles)
+                if presentation.failedFiles > 0 {
+                    LabeledContent("Failed") {
+                        Text("\(presentation.failedFiles)")
+                            .foregroundStyle(.red)
+                    }
                 }
-                GridRow {
-                    progressMetricLabel("Succeeded")
-                    progressMetricValue(presentation.successfulFiles, color: .green)
-                    progressMetricLabel("Failed")
-                    progressMetricValue(
-                        presentation.failedFiles,
-                        color: presentation.failedFiles > 0 ? .red : .secondary
-                    )
-                }
-                GridRow {
-                    progressMetricLabel("Remaining")
-                    progressMetricValue(presentation.remainingFiles)
-                    EmptyView()
-                    EmptyView()
-                }
+                LabeledContent("Remaining", value: "\(presentation.remainingFiles)")
             }
         }
+        .formStyle(.grouped)
     }
 
     private var logViewer: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            operationsPanelHeader("TERMINAL") {
-                Button {
-                    openLogs()
-                } label: {
-                    Image(systemName: "eye")
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .controlSize(.small)
-                .help("Open log file")
-                .accessibilityLabel("View Log")
-                .disabled(jobRunner.currentJob == nil)
-
-                Button {
-                    copyVisibleLog()
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .controlSize(.small)
-                .help("Copy visible terminal lines")
-                .accessibilityLabel("Copy Terminal")
-                .disabled(!canCopyVisibleLogAction)
-
-                Button {
-                    copyReport()
-                } label: {
-                    Image(systemName: "doc.text")
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .controlSize(.small)
-                .help("Copy report")
-                .accessibilityLabel("Copy Report")
-                .disabled(jobRunner.currentJob == nil)
-
-                Menu {
-                    Button("Export JSON…") {
-                        exportReport(as: .json)
+        VStack(spacing: 0) {
+            HStack {
+                Text("Terminal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                ControlGroup {
+                    Button("View Log", systemImage: "eye", action: openLogs)
+                        .disabled(jobRunner.currentJob == nil)
+                    Button("Copy Terminal", systemImage: "doc.on.doc", action: copyVisibleLog)
+                        .disabled(!canCopyVisibleLogAction)
+                    Button("Copy Report", systemImage: "doc.text", action: copyReport)
+                        .disabled(jobRunner.currentJob == nil)
+                    Menu("Export", systemImage: "square.and.arrow.up") {
+                        Button("Export JSON…") { exportReport(as: .json) }
+                        Button("Export CSV…") { exportReport(as: .csv) }
                     }
-                    Button("Export CSV…") {
-                        exportReport(as: .csv)
-                    }
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
+                    .disabled(jobRunner.currentJob == nil)
                 }
-                .menuStyle(.borderlessButton)
-                .font(.caption)
+                .controlGroupStyle(.automatic)
                 .controlSize(.small)
-                .help("Export report")
-                .accessibilityLabel("Export")
-                .disabled(jobRunner.currentJob == nil)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
 
             terminalContent
         }
     }
 
-    private func operationsPanelHeader(_ title: String) -> some View {
-        operationsPanelHeader(title) {
-            EmptyView()
-        }
-    }
-
-    private func operationsPanelHeader<Actions: View>(
-        _ title: String,
-        @ViewBuilder actions: () -> Actions
-    ) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(Self.sectionHeaderFont)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            Spacer(minLength: 8)
-            actions()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(drawerBackground)
-    }
-
-    private func paneHeaderButton(
-        systemImage: String,
-        help: String,
-        isDisabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 16, height: 16)
-                .padding(4)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                )
-        }
-        .buttonStyle(.plain)
-        .controlSize(.small)
-        .disabled(isDisabled)
-        .help(help)
-    }
 
     // MARK: - Helpers
 
     private func setProfilesDrawerVisible(_ isVisible: Bool) {
-        guard showProfilesDrawer != isVisible else { return }
-
-        withAnimation(drawerTransitionAnimation) {
-            showProfilesDrawer = isVisible
-        }
+        let target = WorkspaceLayoutState.splitVisibility(forProfilesDrawer: isVisible)
+        guard splitViewVisibility != target else { return }
+        splitViewVisibility = target
+        UserDefaults.standard.set(isVisible, forKey: WorkspaceLayoutState.showProfilesDrawerKey)
     }
 
     private func setOperationsDrawerVisible(_ isVisible: Bool) {
-        guard showOperationsDrawer != isVisible else { return }
-
-        withAnimation(drawerTransitionAnimation) {
-            showOperationsDrawer = isVisible
-        }
+        let targetPane: WorkspaceOperationsTab? = isVisible ? activeOperationsTab : nil
+        guard rightPane != targetPane else { return }
+        rightPane = targetPane
+        UserDefaults.standard.set(isVisible, forKey: WorkspaceLayoutState.showOperationsDrawerKey)
     }
 
     private func selectOperationsPane(_ tab: WorkspaceOperationsTab) {
-        withAnimation(drawerTransitionAnimation) {
-            rightPane = tab
-            operationsTabRawValue = tab.rawValue
-            showOperationsDrawer = true
-        }
+        rightPane = tab
+        UserDefaults.standard.set(tab.rawValue, forKey: WorkspaceLayoutState.operationsTabKey)
+        UserDefaults.standard.set(true, forKey: WorkspaceLayoutState.showOperationsDrawerKey)
     }
 
 
@@ -1273,7 +1155,13 @@ struct ContentView: View {
 
     private func deleteProfile(_ profile: ServerProfile) {
         guard !jobRunner.isRunning else { return }
-        profileStore.deleteProfile(id: profile.id)
+        profilePendingDeletion = profile
+    }
+
+    private func setProfileColor(_ hex: String?, for profile: ServerProfile) {
+        var updated = profile
+        updated.profileColorHex = hex
+        profileStore.update(updated)
     }
 
     private func clearJobHistory() {
@@ -1376,23 +1264,34 @@ struct ContentView: View {
         deleteQueuedFiles(forRowIDs: targetRowIDs)
     }
 
+    private func moveQueuedFiles(from source: IndexSet, to destination: Int) {
+        droppedFileItems.move(fromOffsets: source, toOffset: destination)
+    }
+
     private func deleteQueuedFiles(forRowIDs rowIDs: Set<String>) {
         guard !rowIDs.isEmpty else { return }
 
+        let queuedRowIDs = Set(rowIDs.filter(DisplayFile.isQueuedRowID))
+        guard !queuedRowIDs.isEmpty else { return }
+
         let queuedItemIDs = Set(
-            filesForDisplay()
-                .filter { rowIDs.contains($0.id) && $0.source == .queued }
-                .map(\.item.id)
+            droppedFileItems
+                .map(\.id)
+                .filter { queuedRowIDs.contains(DisplayFile.queuedRowID(for: $0)) }
         )
         guard !queuedItemIDs.isEmpty else { return }
 
         droppedFileItems.removeAll { queuedItemIDs.contains($0.id) }
-        selectedFileRowIDs.subtract(rowIDs)
+        selectedFileRowIDs.subtract(queuedRowIDs)
         pruneFileSelection()
     }
 
     private func pruneFileSelection() {
-        let validRowIDs = Set(filesForDisplay().map(\.id))
+        var validRowIDs = Set<String>()
+        if let job = jobRunner.currentJob {
+            validRowIDs.formUnion(job.localFiles.map { DisplayFile.currentJobRowID(for: $0.id) })
+        }
+        validRowIDs.formUnion(droppedFileItems.map { DisplayFile.queuedRowID(for: $0.id) })
         selectedFileRowIDs.formIntersection(validRowIDs)
     }
 
@@ -1500,18 +1399,6 @@ struct ContentView: View {
         )
     }
 
-    private func progressMetricLabel(_ label: String) -> some View {
-        Text(label)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-    }
-
-    private func progressMetricValue(_ value: Int, color: Color = .primary) -> some View {
-        Text("\(value)")
-            .font(.caption2.monospacedDigit().weight(.semibold))
-            .foregroundStyle(color)
-            .frame(minWidth: 24, alignment: .trailing)
-    }
 
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()

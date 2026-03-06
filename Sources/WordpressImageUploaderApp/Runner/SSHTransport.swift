@@ -166,6 +166,38 @@ final class SSHTransport {
         writer: LogWriter?,
         onLine: (@Sendable (CommandOutputStream, String) -> Void)? = nil
     ) async throws {
+        do {
+            try await attemptRsyncFile(
+                profile: profile, auth: auth,
+                localFileURL: localFileURL, remoteTargetPath: remoteTargetPath,
+                writer: writer, onLine: onLine
+            )
+        } catch let error as CommandRunnerError {
+            guard case .nonZeroExit(let code, _) = error,
+                  isTransientRsyncExitCode(code)
+            else {
+                throw error
+            }
+
+            writer?.append("Transient rsync error (exit \(code)), retrying in 2 seconds…")
+            try await Task.sleep(for: .seconds(2))
+
+            try await attemptRsyncFile(
+                profile: profile, auth: auth,
+                localFileURL: localFileURL, remoteTargetPath: remoteTargetPath,
+                writer: writer, onLine: onLine
+            )
+        }
+    }
+
+    private func attemptRsyncFile(
+        profile: ServerProfile,
+        auth: SSHAuthContext,
+        localFileURL: URL,
+        remoteTargetPath: String,
+        writer: LogWriter?,
+        onLine: (@Sendable (CommandOutputStream, String) -> Void)? = nil
+    ) async throws {
         var arguments = makeRsyncArguments(
             profile: profile,
             auth: auth,
@@ -211,6 +243,14 @@ final class SSHTransport {
 
         let stderrTail = firstAttempt.stderrLines.suffix(3).joined(separator: " | ")
         throw CommandRunnerError.nonZeroExit(code: firstAttempt.exitCode, stderrTail: stderrTail)
+    }
+
+    private func isTransientRsyncExitCode(_ code: Int32) -> Bool {
+        // 12: Error in rsync protocol data stream
+        // 23: Partial transfer due to error
+        // 30: Timeout in data send/receive
+        // 255: SSH connection error
+        [12, 23, 30, 255].contains(code)
     }
 
     // MARK: - Remote helpers

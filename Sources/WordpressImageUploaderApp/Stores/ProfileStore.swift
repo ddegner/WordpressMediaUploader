@@ -1,16 +1,48 @@
 import Foundation
 import Observation
+import os
+
+private let logger = Logger(subsystem: "com.wpmediauploader.app", category: "ProfileStore")
 
 private struct ProfilesDiskState: Codable {
     var profiles: [ServerProfile]
+}
+
+protocol SecretStoring {
+    func setSecret(_ secret: String, account: String) throws
+    func getSecret(account: String) throws -> String?
+    func deleteSecret(account: String) throws
+}
+
+struct KeychainSecretStore: SecretStoring {
+    func setSecret(_ secret: String, account: String) throws {
+        try KeychainService.setSecret(secret, account: account)
+    }
+
+    func getSecret(account: String) throws -> String? {
+        try KeychainService.getSecret(account: account)
+    }
+
+    func deleteSecret(account: String) throws {
+        try KeychainService.deleteSecret(account: account)
+    }
 }
 
 @MainActor
 @Observable
 final class ProfileStore {
     var profiles: [ServerProfile] = []
+    var lastError: String?
 
-    init() {
+    private let secretStore: any SecretStoring
+    private let profilesFileURL: URL
+
+    init(
+        secretStore: any SecretStoring = KeychainSecretStore(),
+        profilesFileURL: URL = AppPaths.profilesFile
+    ) {
+        self.secretStore = secretStore
+        self.profilesFileURL = profilesFileURL
         load()
     }
 
@@ -20,8 +52,14 @@ final class ProfileStore {
 
     func update(_ profile: ServerProfile) {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
-        profiles[idx] = profile
-        save()
+        var updatedProfiles = profiles
+        updatedProfiles[idx] = profile
+
+        do {
+            try persistProfiles(updatedProfiles)
+        } catch {
+            handlePersistenceError(error)
+        }
     }
 
     func add(_ profile: ServerProfile) {
@@ -29,8 +67,12 @@ final class ProfileStore {
             update(profile)
             return
         }
-        profiles.append(profile)
-        save()
+
+        do {
+            try persistProfiles(profiles + [profile])
+        } catch {
+            handlePersistenceError(error)
+        }
     }
 
     @discardableResult
@@ -39,117 +81,178 @@ final class ProfileStore {
         password: String,
         keyPassphrase: String
     ) throws -> ServerProfile {
-        if profiles.contains(where: { $0.id == profile.id }) {
-            update(profile)
-        } else {
-            add(profile)
-        }
+        let previousProfile = profiles.first(where: { $0.id == profile.id })
+        let previousPassword = previousProfile.flatMap(loadPassword(for:))
+        let previousKeyPassphrase = previousProfile.flatMap(loadKeyPassphrase(for:))
 
         var storedProfile = profile
-        if profile.authType == .password {
-            storedProfile = try clearKeyPassphrase(for: storedProfile)
-            if trimmed(password).isEmpty {
-                storedProfile = try clearPassword(for: storedProfile)
+        do {
+            if profile.authType == .password {
+                storedProfile = try clearingKeyPassphrase(for: storedProfile)
+                if trimmed(password).isEmpty {
+                    storedProfile = try clearingPassword(for: storedProfile)
+                } else {
+                    storedProfile = try storingPassword(password, for: storedProfile)
+                }
             } else {
-                storedProfile = try savePassword(password, for: storedProfile)
+                storedProfile = try clearingPassword(for: storedProfile)
+                if keyPassphrase.isEmpty {
+                    storedProfile = try clearingKeyPassphrase(for: storedProfile)
+                } else {
+                    storedProfile = try storingKeyPassphrase(keyPassphrase, for: storedProfile)
+                }
             }
-        } else {
-            storedProfile = try clearPassword(for: storedProfile)
-            if keyPassphrase.isEmpty {
-                storedProfile = try clearKeyPassphrase(for: storedProfile)
-            } else {
-                storedProfile = try saveKeyPassphrase(keyPassphrase, for: storedProfile)
-            }
-        }
 
-        return storedProfile
+            do {
+                try persistProfiles(upserting(profile: storedProfile, into: profiles))
+            } catch {
+                handlePersistenceError(error)
+                throw error
+            }
+            return storedProfile
+        } catch {
+            restoreSecrets(
+                previousProfile: previousProfile,
+                previousPassword: previousPassword,
+                previousKeyPassphrase: previousKeyPassphrase,
+                fallbackProfile: storedProfile
+            )
+            throw error
+        }
     }
 
     func deleteProfile(id: UUID) {
         guard let profile = profiles.first(where: { $0.id == id }) else { return }
 
         if let passwordAccount = profile.passwordKeychainId {
-            try? KeychainService.deleteSecret(account: passwordAccount)
+            try? secretStore.deleteSecret(account: passwordAccount)
         }
         if let keyPassphraseAccount = profile.keyPassphraseKeychainId {
-            try? KeychainService.deleteSecret(account: keyPassphraseAccount)
+            try? secretStore.deleteSecret(account: keyPassphraseAccount)
         }
 
-        profiles.removeAll { $0.id == id }
-        save()
+        do {
+            try persistProfiles(profiles.filter { $0.id != id })
+        } catch {
+            handlePersistenceError(error)
+        }
     }
 
-    func savePassword(_ password: String, for profile: ServerProfile) throws -> ServerProfile {
+    private func storingPassword(_ password: String, for profile: ServerProfile) throws -> ServerProfile {
         let account = profile.passwordKeychainId ?? "profile-\(profile.id)-password"
-        try KeychainService.setSecret(password, account: account)
+        try secretStore.setSecret(password, account: account)
         var updated = profile
         updated.passwordKeychainId = account
-        update(updated)
         return updated
     }
 
-    func clearPassword(for profile: ServerProfile) throws -> ServerProfile {
+    private func clearingPassword(for profile: ServerProfile) throws -> ServerProfile {
         guard let account = profile.passwordKeychainId else {
             return profile
         }
-        try KeychainService.deleteSecret(account: account)
+        try secretStore.deleteSecret(account: account)
         var updated = profile
         updated.passwordKeychainId = nil
-        update(updated)
         return updated
     }
 
-    func saveKeyPassphrase(_ passphrase: String, for profile: ServerProfile) throws -> ServerProfile {
+    private func storingKeyPassphrase(_ passphrase: String, for profile: ServerProfile) throws -> ServerProfile {
         let account = profile.keyPassphraseKeychainId ?? "profile-\(profile.id)-key-passphrase"
-        try KeychainService.setSecret(passphrase, account: account)
+        try secretStore.setSecret(passphrase, account: account)
         var updated = profile
         updated.keyPassphraseKeychainId = account
-        update(updated)
         return updated
     }
 
-    func clearKeyPassphrase(for profile: ServerProfile) throws -> ServerProfile {
+    private func clearingKeyPassphrase(for profile: ServerProfile) throws -> ServerProfile {
         guard let account = profile.keyPassphraseKeychainId else {
             return profile
         }
-        try KeychainService.deleteSecret(account: account)
+        try secretStore.deleteSecret(account: account)
         var updated = profile
         updated.keyPassphraseKeychainId = nil
-        update(updated)
         return updated
     }
 
     func loadPassword(for profile: ServerProfile) -> String? {
         guard let account = profile.passwordKeychainId else { return nil }
-        return try? KeychainService.getSecret(account: account)
+        return try? secretStore.getSecret(account: account)
     }
 
     func loadKeyPassphrase(for profile: ServerProfile) -> String? {
         guard let account = profile.keyPassphraseKeychainId else { return nil }
-        return try? KeychainService.getSecret(account: account)
+        return try? secretStore.getSecret(account: account)
     }
 
-    private func save() {
+    private func persistProfiles(_ profiles: [ServerProfile]) throws {
+        AppPaths.ensureDirectory(profilesFileURL.deletingLastPathComponent())
         let state = ProfilesDiskState(profiles: profiles)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
-        do {
-            let data = try encoder.encode(state)
-            try data.write(to: AppPaths.profilesFile, options: [.atomic])
-        } catch {
-            print("Failed to save profiles: \(error)")
-        }
+        let data = try encoder.encode(state)
+        try data.write(to: profilesFileURL, options: [.atomic])
+        self.profiles = profiles
+        lastError = nil
     }
 
     private func load() {
+        let fileURL = profilesFileURL
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            profiles = []
+            return
+        }
+
         do {
-            let data = try Data(contentsOf: AppPaths.profilesFile)
+            let data = try Data(contentsOf: fileURL)
             let decoded = try JSONDecoder().decode(ProfilesDiskState.self, from: data)
             profiles = decoded.profiles
         } catch {
             profiles = []
+            lastError = "Profiles data could not be read and was reset. (\(error.localizedDescription))"
+            logger.error("Failed to load profiles: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func upserting(profile: ServerProfile, into profiles: [ServerProfile]) -> [ServerProfile] {
+        if let idx = profiles.firstIndex(where: { $0.id == profile.id }) {
+            var updatedProfiles = profiles
+            updatedProfiles[idx] = profile
+            return updatedProfiles
+        }
+
+        return profiles + [profile]
+    }
+
+    private func restoreSecrets(
+        previousProfile: ServerProfile?,
+        previousPassword: String?,
+        previousKeyPassphrase: String?,
+        fallbackProfile: ServerProfile
+    ) {
+        restoreSecret(
+            account: previousProfile?.passwordKeychainId ?? fallbackProfile.passwordKeychainId,
+            secret: previousPassword
+        )
+        restoreSecret(
+            account: previousProfile?.keyPassphraseKeychainId ?? fallbackProfile.keyPassphraseKeychainId,
+            secret: previousKeyPassphrase
+        )
+    }
+
+    private func restoreSecret(account: String?, secret: String?) {
+        guard let account else { return }
+
+        if let secret {
+            try? secretStore.setSecret(secret, account: account)
+        } else {
+            try? secretStore.deleteSecret(account: account)
+        }
+    }
+
+    private func handlePersistenceError(_ error: Error) {
+        lastError = "Failed to save profiles: \(error.localizedDescription)"
+        logger.error("Failed to save profiles: \(error.localizedDescription, privacy: .public)")
     }
 
     private func trimmed(_ value: String) -> String {

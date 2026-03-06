@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import os
+
+private let logger = Logger(subsystem: "com.wpmediauploader.app", category: "JobStore")
 
 @MainActor
 @Observable
@@ -7,6 +10,7 @@ final class JobStore {
     private static let maxStoredJobs = 100
 
     var jobs: [Job] = []
+    var lastError: String?
 
     init() {
         load()
@@ -49,19 +53,6 @@ final class JobStore {
         jobs.first { $0.id == id }
     }
 
-    func removeActiveJobs() {
-        let before = jobs.count
-        let removedLogPaths = jobs
-            .filter { JobStep.inFlightSteps.contains($0.step) }
-            .map(\.logsPath)
-        jobs.removeAll { JobStep.inFlightSteps.contains($0.step) }
-        if jobs.count != before {
-            if save() {
-                cleanupLogFiles(atPaths: removedLogPaths)
-            }
-        }
-    }
-
     @discardableResult
     private func save() -> Bool {
         let encoder = JSONEncoder()
@@ -71,21 +62,31 @@ final class JobStore {
         do {
             let data = try encoder.encode(jobs)
             try data.write(to: AppPaths.jobsFile, options: [.atomic])
+            lastError = nil
             return true
         } catch {
-            print("Failed to save jobs: \(error)")
+            lastError = "Failed to save job history: \(error.localizedDescription)"
+            logger.error("Failed to save jobs: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }
 
     private func load() {
+        let fileURL = AppPaths.jobsFile
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            jobs = []
+            return
+        }
+
         do {
-            let data = try Data(contentsOf: AppPaths.jobsFile)
+            let data = try Data(contentsOf: fileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             jobs = try decoder.decode([Job].self, from: data)
         } catch {
             jobs = []
+            lastError = "Job history could not be read and was reset. (\(error.localizedDescription))"
+            logger.error("Failed to load jobs: \(error.localizedDescription, privacy: .public)")
         }
     }
 

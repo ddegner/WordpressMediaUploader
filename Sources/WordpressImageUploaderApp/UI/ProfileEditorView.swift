@@ -4,12 +4,13 @@ struct ProfileEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let jobRunner: JobRunner
-    let onSave: (ServerProfile, String, String) -> Void
+    let onSave: (ServerProfile, String, String) throws -> Void
 
     @State private var profile: ServerProfile
     @State private var password: String
     @State private var keyPassphrase: String
     @State private var showKeyImporter = false
+    @State private var saveError: String?
 
     @State private var isTesting = false
     @State private var testLines: [String] = []
@@ -20,7 +21,7 @@ struct ProfileEditorView: View {
         initialPassword: String?,
         initialKeyPassphrase: String?,
         jobRunner: JobRunner,
-        onSave: @escaping (ServerProfile, String, String) -> Void
+        onSave: @escaping (ServerProfile, String, String) throws -> Void
     ) {
         self.jobRunner = jobRunner
         self.onSave = onSave
@@ -67,6 +68,14 @@ struct ProfileEditorView: View {
             profile.keyPath = url.path
         }
         .frame(width: 720, height: 760)
+        .alert("Save Error", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK") { saveError = nil }
+        } message: {
+            Text(saveError ?? "")
+        }
     }
 
     // MARK: - Connection
@@ -165,12 +174,16 @@ struct ProfileEditorView: View {
     }
 
     private func saveAndClose() {
-        onSave(
-            profile,
-            password,
-            keyPassphrase
-        )
-        dismiss()
+        do {
+            try onSave(
+                profile,
+                password,
+                keyPassphrase
+            )
+            dismiss()
+        } catch {
+            saveError = error.localizedDescription
+        }
     }
 
     private func runConnectionTest() {

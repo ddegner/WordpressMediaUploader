@@ -196,23 +196,22 @@ struct JobPresentation: Sendable {
 
         let etaLine: String
         if job.step.isTerminal {
-            etaLine = "ETA: Complete"
+            etaLine = "Complete"
         } else if let runtimeEstimate {
             if runtimeEstimate.secondsRemaining < 60 {
-                etaLine = "ETA: <1 min"
+                etaLine = "<1 min"
             } else {
-                let value = durationFormatter.string(from: runtimeEstimate.secondsRemaining) ?? "Estimating..."
-                etaLine = "ETA: \(value)"
+                etaLine = durationFormatter.string(from: runtimeEstimate.secondsRemaining) ?? "Estimating..."
             }
         } else {
-            etaLine = "ETA: Estimating..."
+            etaLine = "Estimating..."
         }
 
         let rateLine: String
         if let runtimeEstimate {
-            rateLine = String(format: "Rate: %.1f files/min", runtimeEstimate.filesPerMinute)
+            rateLine = String(format: "%.1f files/min", runtimeEstimate.filesPerMinute)
         } else {
-            rateLine = job.step.isTerminal ? "Rate: n/a" : "Rate: Estimating..."
+            rateLine = job.step.isTerminal ? "n/a" : "Estimating..."
         }
 
         return JobPresentation(

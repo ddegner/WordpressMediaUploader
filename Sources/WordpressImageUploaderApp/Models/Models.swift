@@ -29,6 +29,7 @@ struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
     var wpRootPath: String
     var remoteStagingRoot: String
     var keepRemoteFiles: Bool
+    var profileColorHex: String?
 
     static let `default` = ServerProfile(
         id: UUID(),
@@ -42,17 +43,50 @@ struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
         passwordKeychainId: nil,
         wpRootPath: "",
         remoteStagingRoot: "~/wp-media-import",
-        keepRemoteFiles: false
+        keepRemoteFiles: false,
+        profileColorHex: nil
     )
 }
 
-enum FileItemStatus: String, Codable, CaseIterable, Sendable {
+struct ProfileColor: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let hex: String
+
+    static let presets: [ProfileColor] = [
+        ProfileColor(id: "blue", name: "Blue", hex: "007AFF"),
+        ProfileColor(id: "purple", name: "Purple", hex: "AF52DE"),
+        ProfileColor(id: "pink", name: "Pink", hex: "FF2D55"),
+        ProfileColor(id: "red", name: "Red", hex: "FF3B30"),
+        ProfileColor(id: "orange", name: "Orange", hex: "FF9500"),
+        ProfileColor(id: "green", name: "Green", hex: "34C759"),
+        ProfileColor(id: "teal", name: "Teal", hex: "5AC8FA"),
+        ProfileColor(id: "indigo", name: "Indigo", hex: "5856D6"),
+    ]
+}
+
+enum FileItemStatus: String, Codable, CaseIterable, Sendable, Comparable {
     case queued
     case uploaded
     case verified
     case imported
     case regenerated
     case failed
+
+    private var sortOrder: Int {
+        switch self {
+        case .queued: return 0
+        case .uploaded: return 1
+        case .verified: return 2
+        case .imported: return 3
+        case .regenerated: return 4
+        case .failed: return 5
+        }
+    }
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.sortOrder < rhs.sortOrder
+    }
 }
 
 struct FileItem: Identifiable, Codable, Equatable, Sendable {

@@ -314,6 +314,7 @@ final class JobRunner {
 
         let logURL = URL(fileURLWithPath: job.logsPath)
         let writer = LogWriter(fileURL: logURL)
+        defer { writer.flush() }
         appendLog("Job started: \(job.id.uuidString)", writer: writer)
 
         let logger = lineLogger(writer: writer)

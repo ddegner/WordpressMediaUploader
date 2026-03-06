@@ -7,6 +7,10 @@ VERSION_STRING="${VERSION_STRING:-}"
 PLATFORM="${PLATFORM:-MAC_OS}"
 LOCALE="${LOCALE:-en-US}"
 REVIEW_SUBMISSION_POLL_TIMEOUT_SECONDS="${REVIEW_SUBMISSION_POLL_TIMEOUT_SECONDS:-180}"
+BUILD_NUMBER="${BUILD_NUMBER:-}"
+AUTO_ATTACH_LATEST_BUILD="${AUTO_ATTACH_LATEST_BUILD:-1}"
+USES_NON_EXEMPT_ENCRYPTION="${USES_NON_EXEMPT_ENCRYPTION:-false}"
+REVIEW_NOTES_FILE="${REVIEW_NOTES_FILE:-apple-reviewer-instructions.md}"
 
 NEW_SUBTITLE="${NEW_SUBTITLE:-Bulk WordPress Media Uploads}"
 NEW_KEYWORDS="${NEW_KEYWORDS:-wordpress,wp-cli,media uploader,ssh,rsync,bulk upload,images,photos,blogging}"
@@ -37,6 +41,15 @@ if ! command -v jq >/dev/null 2>&1; then
     echo "ERROR: jq is required."
     exit 1
 fi
+
+case "${USES_NON_EXEMPT_ENCRYPTION}" in
+    true|false)
+        ;;
+    *)
+        echo "ERROR: USES_NON_EXEMPT_ENCRYPTION must be true or false."
+        exit 1
+        ;;
+esac
 
 key_path_auth="${API_PRIVATE_KEYS_DIR}/AuthKey_${ASC_KEY_ID}.p8"
 key_path_api="${API_PRIVATE_KEYS_DIR}/ApiKey_${ASC_KEY_ID}.p8"
@@ -210,6 +223,74 @@ case "${app_store_state}" in
         echo "==> Version already submitted or beyond submission state; no new submission created."
         ;;
     *)
+        if [[ -n "${REVIEW_NOTES_FILE}" ]]; then
+            if [[ -f "${REVIEW_NOTES_FILE}" ]]; then
+                echo "==> Updating App Review notes from ${REVIEW_NOTES_FILE}"
+                review_detail_json="$(asc_api GET "/v1/appStoreVersions/${app_store_version_id}/appStoreReviewDetail")"
+                app_store_review_detail_id="$(printf '%s' "${review_detail_json}" | jq -r '.data.id // empty')"
+                if [[ -n "${app_store_review_detail_id}" ]]; then
+                    review_notes_payload="$(jq -cn \
+                        --arg id "${app_store_review_detail_id}" \
+                        --rawfile notes "${REVIEW_NOTES_FILE}" \
+                        '{data:{type:"appStoreReviewDetails",id:$id,attributes:{notes:$notes}}}')"
+                    asc_api PATCH "/v1/appStoreReviewDetails/${app_store_review_detail_id}" "${review_notes_payload}" >/dev/null
+                else
+                    echo "WARN: appStoreReviewDetail not found for version ${VERSION_STRING}; skipping review notes update."
+                fi
+            else
+                echo "WARN: REVIEW_NOTES_FILE not found: ${REVIEW_NOTES_FILE}; skipping review notes update."
+            fi
+        fi
+
+        if [[ "${AUTO_ATTACH_LATEST_BUILD}" == "1" || -n "${BUILD_NUMBER}" ]]; then
+            echo "==> Resolving valid build for version ${VERSION_STRING} (${PLATFORM})"
+            builds_json="$(asc_api GET "/v1/builds?filter%5Bapp%5D=${APP_ID}&filter%5BpreReleaseVersion.version%5D=${VERSION_STRING}&filter%5BpreReleaseVersion.platform%5D=${PLATFORM}&filter%5BprocessingState%5D=VALID&sort=-uploadedDate&limit=200")"
+            if [[ -n "${BUILD_NUMBER}" ]]; then
+                selected_build_id="$(
+                    printf '%s' "${builds_json}" |
+                        jq -r --arg build_number "${BUILD_NUMBER}" '.data[]? | select(.attributes.version==$build_number) | .id' |
+                        head -n 1
+                )"
+                selected_build_number="${BUILD_NUMBER}"
+            else
+                selected_build_id="$(printf '%s' "${builds_json}" | jq -r '.data[0].id // empty')"
+                selected_build_number="$(printf '%s' "${builds_json}" | jq -r '.data[0].attributes.version // empty')"
+            fi
+
+            if [[ -z "${selected_build_id}" ]]; then
+                if [[ -n "${BUILD_NUMBER}" ]]; then
+                    echo "ERROR: Could not find VALID build ${BUILD_NUMBER} for version ${VERSION_STRING} (${PLATFORM})."
+                else
+                    echo "ERROR: Could not find a VALID build for version ${VERSION_STRING} (${PLATFORM})."
+                    echo "Wait for build processing to finish in App Store Connect, then retry."
+                fi
+                exit 1
+            fi
+
+            echo "==> Attaching build ${selected_build_number} to appStoreVersion ${app_store_version_id}"
+            attach_build_payload="$(jq -cn \
+                --arg build_id "${selected_build_id}" \
+                '{data:{type:"builds",id:$build_id}}')"
+            asc_api PATCH "/v1/appStoreVersions/${app_store_version_id}/relationships/build" "${attach_build_payload}" >/dev/null
+
+            echo "==> Ensuring encryption declaration on build ${selected_build_number}"
+            build_details_json="$(asc_api GET "/v1/builds/${selected_build_id}")"
+            current_uses_non_exempt="$(
+                printf '%s' "${build_details_json}" |
+                    jq -r '.data.attributes.usesNonExemptEncryption // empty'
+            )"
+
+            if [[ "${current_uses_non_exempt}" == "${USES_NON_EXEMPT_ENCRYPTION}" ]]; then
+                echo "==> Encryption declaration already set to ${USES_NON_EXEMPT_ENCRYPTION}; skipping update."
+            else
+                encryption_payload="$(jq -cn \
+                    --arg id "${selected_build_id}" \
+                    --argjson uses_non_exempt "${USES_NON_EXEMPT_ENCRYPTION}" \
+                    '{data:{type:"builds",id:$id,attributes:{usesNonExemptEncryption:$uses_non_exempt}}}')"
+                asc_api PATCH "/v1/builds/${selected_build_id}" "${encryption_payload}" >/dev/null
+            fi
+        fi
+
         echo "==> Reconciling review submissions for resubmission"
         review_submissions_json="$(asc_api GET "/v1/reviewSubmissions?filter%5Bapp%5D=${APP_ID}&limit=50")"
 

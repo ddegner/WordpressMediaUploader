@@ -35,31 +35,8 @@ struct WindowCommandActions {
     let canExportCSVReport: Bool
 }
 
-private struct ShowProfilesDrawerBindingKey: FocusedValueKey {
-    typealias Value = Binding<Bool>
-}
-
-private struct ShowOperationsDrawerBindingKey: FocusedValueKey {
-    typealias Value = Binding<Bool>
-}
-
-private struct WindowCommandActionsKey: FocusedValueKey {
-    typealias Value = WindowCommandActions
-}
-
 extension FocusedValues {
-    var showProfilesDrawerBinding: Binding<Bool>? {
-        get { self[ShowProfilesDrawerBindingKey.self] }
-        set { self[ShowProfilesDrawerBindingKey.self] = newValue }
-    }
-
-    var showOperationsDrawerBinding: Binding<Bool>? {
-        get { self[ShowOperationsDrawerBindingKey.self] }
-        set { self[ShowOperationsDrawerBindingKey.self] = newValue }
-    }
-
-    var windowCommandActions: WindowCommandActions? {
-        get { self[WindowCommandActionsKey.self] }
-        set { self[WindowCommandActionsKey.self] = newValue }
-    }
+    @Entry var showProfilesDrawerBinding: Binding<Bool>?
+    @Entry var showOperationsDrawerBinding: Binding<Bool>?
+    @Entry var windowCommandActions: WindowCommandActions?
 }

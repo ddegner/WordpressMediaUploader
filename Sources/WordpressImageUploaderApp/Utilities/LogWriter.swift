@@ -1,11 +1,15 @@
 import Foundation
 
 final class LogWriter: @unchecked Sendable {
+    private static let queueKey = DispatchSpecificKey<Void>()
+
     private let queue = DispatchQueue(label: "WPMediaUploader.LogWriter")
     private let dateFormatter = ISO8601DateFormatter()
     private var handle: FileHandle?
 
     init(fileURL: URL) {
+        queue.setSpecific(key: Self.queueKey, value: ())
+
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         }
@@ -21,18 +25,25 @@ final class LogWriter: @unchecked Sendable {
     }
 
     deinit {
-        if let handle {
+        let closeHandle = {
+            guard let handle = self.handle else { return }
             do {
+                try handle.synchronize()
                 try handle.close()
             } catch {
                 // Best-effort close; nothing to do on failure.
             }
         }
+
+        if DispatchQueue.getSpecific(key: Self.queueKey) != nil {
+            closeHandle()
+        } else {
+            queue.sync(execute: closeHandle)
+        }
     }
 
     func append(_ line: String) {
-        queue.async { [weak self] in
-            guard let self else { return }
+        queue.async { [self] in
             let timestamp = self.dateFormatter.string(from: Date())
             let payload = "[\(timestamp)] \(line)\n"
             guard let data = payload.data(using: .utf8) else { return }
@@ -44,5 +55,10 @@ final class LogWriter: @unchecked Sendable {
                 print("Failed to write log: \(error)")
             }
         }
+    }
+
+    func flush() {
+        guard DispatchQueue.getSpecific(key: Self.queueKey) == nil else { return }
+        queue.sync {}
     }
 }
