@@ -31,6 +31,18 @@ func isSupportedImageExtension(_ url: URL) -> Bool {
     supportedImageExtensions.contains(url.pathExtension.lowercased())
 }
 
+// Prefix a `wp` command with a PHP finder so WP-CLI uses the correct PHP binary
+// even on servers where only versioned names (php8.1, php8.2, …) exist in PATH.
+// WP-CLI honours WP_CLI_PHP; if none is found the var is empty and WP-CLI falls
+// back to its own detection — no regression on well-configured servers.
+// Versioned names are checked first so a broken /usr/bin/php symlink (e.g. from
+// CyberPanel overwriting it) does not shadow a working php8.x binary.
+private let wpCliPhpFinder = "WP_CLI_PHP=$(command -v php8.4 php8.3 php8.2 php8.1 php8.0 php84 php83 php82 php81 php80 php 2>/dev/null | head -1)"
+
+func wpCommand(_ command: String) -> String {
+    "export \(wpCliPhpFinder); \(command)"
+}
+
 func parseRsyncProgress(_ line: String) -> Double? {
     guard let percentRange = line.range(of: #"\d{1,3}%"#, options: .regularExpression) else {
         return nil

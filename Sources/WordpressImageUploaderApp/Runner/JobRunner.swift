@@ -435,7 +435,7 @@ final class JobRunner {
         _ = try await transport.runSSH(
             profile: profile,
             auth: auth,
-            remoteCommand: "wp --path=\(shellSingleQuote(profile.wpRootPath)) core version",
+            remoteCommand: wpCommand("wp --path=\(shellSingleQuote(profile.wpRootPath)) core version"),
             writer: writer,
             onLine: logger
         )
@@ -598,7 +598,7 @@ final class JobRunner {
                     let wpPath = shellSingleQuote(profile.wpRootPath)
                     let remoteSQ = shellSingleQuote(remotePath)
                     let baseCommand = "wp --path=\(wpPath) media import \(remoteSQ) --porcelain"
-                    let command = wrapWithOptionalTimeout(command: baseCommand, seconds: 600)
+                    let command = wpCommand(wrapWithOptionalTimeout(command: baseCommand, seconds: 600))
                     let heartbeat = startLongCommandHeartbeat(
                         activity: "Importing \(afterVerify.filename)",
                         writer: writer
@@ -697,7 +697,7 @@ final class JobRunner {
         let wpPath = shellSingleQuote(profile.wpRootPath)
         let baseCommand =
             "wp --path=\(wpPath) media regenerate \(attachmentId) --only-missing --yes"
-        let command = wrapWithOptionalTimeout(command: baseCommand, seconds: 600)
+        let command = wpCommand(wrapWithOptionalTimeout(command: baseCommand, seconds: 600))
         let heartbeat = startLongCommandHeartbeat(
             activity: "Regenerating thumbnails for \(fileName)",
             writer: writer

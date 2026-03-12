@@ -4,19 +4,47 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- GitHub Actions release automation at `.github/workflows/release-package.yml` to build/sign/notarize/staple on tag pushes, publish GitHub Release assets, and publish a GHCR package containing the release zip + checksum.
+- `scripts/app_store_resubmit.sh` to update App Store metadata and submit versions for review, with explicit credential/version inputs and `umask 077`.
+- `APP_STORE_CONNECT_SUBMISSION_RUNBOOK.md` and `APP_STORE_METADATA.md` for repeatable App Store Connect submission and metadata remediation steps.
+- Per-profile color coding with preset palette and context-menu color picker in the sidebar.
+- Drag-to-reorder support for queued files in the workbench file list.
+- Confirmation dialogs for destructive actions: delete profile, reset queue, and clear job history.
+- "Add Files" toolbar button for adding files without drag-and-drop.
+- `SecretStoring` protocol and `KeychainSecretStore` for testable Keychain access.
+- `ColorHelpers.swift` utility with `Color(hexString:)` and `hexStringValue`.
+- `LogWriterTests` and `ProfileStoreTests` with mock secret store for transactional save/rollback coverage.
+- Empty-state drop zone overlay with dashed border and "Drop images here" placeholder in the file list.
+
 ### Changed
 - `scripts/build_distribution.sh` now publishes a GitHub Release by default: it ensures `v<version>` tag alignment with `HEAD`, pushes the tag to `origin`, and creates/updates the release with `WPMediaUploader-v<version>-macOS.zip` plus `sha256.txt`.
 - `scripts/build_distribution.sh` now defaults `NOTARY_KEYCHAIN_PROFILE` to `notary-profile` (still overrideable via env).
 - Starting an upload no longer forces the operations drawer open; if the drawer is hidden, it remains hidden.
 - Queue row status now shows `PREFLIGHT` during preflight, uses an in-progress spinner for preflight rows, and aligns preflight hover text with active preflight processing.
+- Operations drawer now uses SwiftUI `.inspector()` modifier with resizable column (280–400pt) instead of manual HStack layout.
+- Active job panel uses `Form` with `LabeledContent` instead of a custom metrics grid.
+- `FocusedValues` entries use `@Entry` macro instead of verbose `FocusedValueKey` boilerplate.
+- Sidebar profile list uses `ControlGroup` for add/remove buttons and removes the explicit "PROFILES" section header.
+- Operations drawer tab picker, terminal header, and job history header use standard SwiftUI controls (`ControlGroup`, `ContentUnavailableView`).
+- Drawer window-state persistence moved from `@AppStorage` to manual `UserDefaults` reads in `onAppear` to avoid spurious re-renders.
+- `JobPresentation` ETA/Rate lines no longer include label prefixes (now handled by `LabeledContent` in the UI).
+- `app_store_resubmit.sh` now supports build attachment, encryption declaration, and review notes upload.
+- Bumped build number to 5.
+- SSH authentication now uses the app binary itself as `SSH_ASKPASS` helper instead of temporary shell scripts, which the App Sandbox blocked from being exec'd.
+- Remote WP-CLI commands auto-detect versioned PHP binaries (`php8.1`–`php8.4`) via `WP_CLI_PHP` to work on servers without a plain `php` symlink.
+- SSH remote commands now execute inside a login shell (`bash -lc`) so the server's full `PATH` is available.
+- Custom app entry point via `main.swift` replaces `@main` to support `SSH_ASKPASS` helper mode.
 
-### Added
-- GitHub Actions release automation at `.github/workflows/release-package.yml` to build/sign/notarize/staple on tag pushes, publish GitHub Release assets, and publish a GHCR package containing the release zip + checksum.
-- `scripts/app_store_resubmit.sh` to update App Store metadata and submit versions for review, with explicit credential/version inputs and `umask 077`.
-- `APP_STORE_CONNECT_SUBMISSION_RUNBOOK.md` and `APP_STORE_METADATA.md` for repeatable App Store Connect submission and metadata remediation steps.
+### Fixed
+- Job log files now flush queued writes before a run exits, preventing missing log tails at job completion.
+- In-flight jobs are no longer deleted on app termination, so interrupted uploads remain recoverable on next launch.
+- Profile saves now apply Keychain changes atomically with profile persistence; the editor stays open and shows an alert if credential storage fails.
+- Rsync file transfers now automatically retry once on transient errors (exit codes 12, 23, 30, 255) after a 2-second delay.
+- `ProfileStore` and `JobStore` surface persistence errors to the UI via `lastError` and use `os.Logger` instead of `print()`.
 
 ### Security
-- Transient `SSH_ASKPASS` scripts now use a locked system temp directory with restrictive permissions and backup exclusion, while preserving stale script cleanup for legacy app-support locations.
+- `SSH_ASKPASS` now uses the signed app binary rather than dynamically-created shell scripts, eliminating writable temp files containing secrets.
 - Release workflow now explicitly cleans imported signing credentials (temporary keychain and `.p12`) at job end.
 
 ## [1.0] - 2026-02-17

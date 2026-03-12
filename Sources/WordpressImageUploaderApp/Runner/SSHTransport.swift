@@ -85,29 +85,19 @@ final class SSHTransport {
             }
 
             if let passphrase = keyPassphrase, !passphrase.isEmpty {
-                let scriptURL = try createAskPassScript(secret: passphrase)
-                args = [
-                    "-o", "BatchMode=no"
-                ] + args
-
-                let env = [
-                    "SSH_ASKPASS": scriptURL.path,
-                    "SSH_ASKPASS_REQUIRE": "force",
-                    "DISPLAY": "1"
-                ]
-                return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: scriptURL)
+                let env = try makeAskPassEnv(secret: passphrase)
+                args = ["-o", "BatchMode=no"] + args
+                return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: nil)
             }
 
-            args = [
-                "-o", "BatchMode=yes"
-            ] + args
+            args = ["-o", "BatchMode=yes"] + args
             return SSHAuthContext(additionalSSHArgs: args, environment: nil, askPassScriptURL: nil)
 
         case .password:
             guard let password, !password.isEmpty else {
                 throw JobRunnerError.profileIncomplete(passwordMissingDetail)
             }
-            let scriptURL = try createAskPassScript(secret: password)
+            let env = try makeAskPassEnv(secret: password)
 
             let args = [
                 "-o", "BatchMode=no",
@@ -116,13 +106,7 @@ final class SSHTransport {
                 "-o", "NumberOfPasswordPrompts=1"
             ]
 
-            let env = [
-                "SSH_ASKPASS": scriptURL.path,
-                "SSH_ASKPASS_REQUIRE": "force",
-                "DISPLAY": "1"
-            ]
-
-            return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: scriptURL)
+            return SSHAuthContext(additionalSSHArgs: args, environment: env, askPassScriptURL: nil)
         }
     }
 
@@ -135,7 +119,9 @@ final class SSHTransport {
         writer: LogWriter?,
         onLine: (@Sendable (CommandOutputStream, String) -> Void)? = nil
     ) async throws -> CommandResult {
-        let args = sshBaseArgs(profile: profile, auth: auth) + [remoteCommand]
+        // Wrap in a login shell so the server's full PATH (including versioned PHP) is available.
+        let loginCommand = "bash -lc \(shellSingleQuote(remoteCommand))"
+        let args = sshBaseArgs(profile: profile, auth: auth) + [loginCommand]
         writer?.append("$ /usr/bin/ssh \(args.joined(separator: " "))")
 
         let spec = CommandSpec(
@@ -334,7 +320,7 @@ final class SSHTransport {
         _ = try await runSSH(
             profile: profile,
             auth: auth,
-            remoteCommand: "wp --path=\(shellSingleQuote(profile.wpRootPath)) core is-installed",
+            remoteCommand: wpCommand("wp --path=\(shellSingleQuote(profile.wpRootPath)) core is-installed"),
             writer: writer,
             onLine: onLine
         )
@@ -428,37 +414,20 @@ final class SSHTransport {
         return stderr.contains("append-verify") || stderr.contains("info=progress2")
     }
 
-    private func createAskPassScript(secret: String) throws -> URL {
-        let scriptDirectory = askPassDirectory()
-        AppPaths.ensureDirectory(scriptDirectory)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptDirectory.path)
-
-        var directoryValues = URLResourceValues()
-        directoryValues.isExcludedFromBackup = true
-        var mutableDirectoryURL = scriptDirectory
-        try? mutableDirectoryURL.setResourceValues(directoryValues)
-
-        let scriptURL = scriptDirectory.appendingPathComponent(
-            "askpass-\(UUID().uuidString).sh",
-            isDirectory: false
-        )
-
-        let script = """
-        #!/bin/sh
-        printf '%s\\n' \(shellSingleQuote(secret))
-        """
-
-        do {
-            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
-            var fileValues = URLResourceValues()
-            fileValues.isExcludedFromBackup = true
-            var mutableScriptURL = scriptURL
-            try? mutableScriptURL.setResourceValues(fileValues)
-            return scriptURL
-        } catch {
-            throw JobRunnerError.authSetupFailed(error.localizedDescription)
+    // Use the app binary itself as SSH_ASKPASS. The sandbox blocks exec of dynamically-
+    // created shell scripts but always allows exec of signed binaries in the app bundle.
+    // main.swift detects WP_ASKPASS_MODE=1 and prints the secret before SwiftUI starts.
+    private func makeAskPassEnv(secret: String) throws -> [String: String] {
+        guard let executablePath = Bundle.main.executablePath else {
+            throw JobRunnerError.authSetupFailed("Could not locate app binary for SSH authentication")
         }
+        return [
+            "SSH_ASKPASS": executablePath,
+            "SSH_ASKPASS_REQUIRE": "force",
+            "DISPLAY": "1",
+            "WP_ASKPASS_MODE": "1",
+            "WP_ASKPASS_SECRET": secret
+        ]
     }
 
     private func askPassDirectories() -> [URL] {

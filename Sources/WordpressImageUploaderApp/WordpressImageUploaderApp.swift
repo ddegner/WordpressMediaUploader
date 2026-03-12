@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 
-@main
 struct WordpressMediaUploaderApp: App {
     private static let repositoryURL = URL(string: "https://github.com/ddegner/wp-media-uploader")!
 

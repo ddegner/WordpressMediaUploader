@@ -802,7 +802,8 @@ struct ContentView: View {
     }
 
     private func fileList(currentJobFiles: [DisplayFile], job: Job?) -> some View {
-        List(selection: $selectedFileRowIDs) {
+        let isEmpty = currentJobFiles.isEmpty && droppedFileItems.isEmpty
+        return List(selection: $selectedFileRowIDs) {
             ForEach(currentJobFiles) { file in
                 fileRow(for: file, job: job)
                     .tag(file.id)
@@ -827,6 +828,24 @@ struct ContentView: View {
         .listStyle(.inset(alternatesRowBackgrounds: false))
         .scrollContentBackground(.hidden)
         .background(Self.editorBackground)
+        .overlay {
+            if isEmpty {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+                    .padding(10)
+                    .overlay {
+                        VStack(spacing: 8) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 32, weight: .light))
+                                .foregroundStyle(.secondary.opacity(0.5))
+                            Text("Drop images here")
+                                .font(.callout)
+                                .foregroundStyle(.secondary.opacity(0.5))
+                        }
+                    }
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private var canClearFiles: Bool {
