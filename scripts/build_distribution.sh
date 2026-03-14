@@ -17,8 +17,10 @@ APPLE_ID="${APPLE_ID:-}"
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD:-}"
 PUBLISH_GITHUB_RELEASE="${PUBLISH_GITHUB_RELEASE:-1}"
+PUBLISH_GITHUB_PACKAGE="${PUBLISH_GITHUB_PACKAGE:-1}"
 GITHUB_REPO="${GITHUB_REPO:-}"
 github_release_url=""
+github_package_ref=""
 
 notify() {
     local message="$1"
@@ -162,6 +164,60 @@ publish_github_release() {
     github_release_url="$(gh release view "$tag_name" --repo "$repo_slug" --json url -q .url)"
 }
 
+publish_github_package() {
+    local version="$1"
+    local final_zip="$2"
+    local sha_file="$3"
+    local tag_name="v${version}"
+    local owner
+
+    if ! command -v oras >/dev/null 2>&1; then
+        echo "ERROR: oras is required for package publishing. Install with: brew install oras"
+        echo "Or set PUBLISH_GITHUB_PACKAGE=0."
+        exit 1
+    fi
+
+    # Resolve owner from repo slug or git remote
+    local repo_slug
+    repo_slug="$(resolve_github_repo || true)"
+    if [[ -z "$repo_slug" ]]; then
+        echo "ERROR: Could not determine GitHub repo slug from origin."
+        echo "Set GITHUB_REPO=owner/repo and retry."
+        exit 1
+    fi
+    owner="$(echo "${repo_slug%%/*}" | tr '[:upper:]' '[:lower:]')"
+
+    local ref="ghcr.io/${owner}/wp-media-uploader:${tag_name}"
+
+    echo "==> Publishing GitHub Package ${ref}"
+
+    # Authenticate oras using Docker credential store (populated by gh auth token | docker login)
+    local docker_config="$HOME/.docker/config.json"
+    if [[ ! -f "$docker_config" ]] || ! grep -q "ghcr.io" "$docker_config" 2>/dev/null; then
+        gh auth token | docker login ghcr.io -u "$owner" --password-stdin
+    fi
+
+    # Push zip and sha256 as an OCI artifact; run from a temp dir to avoid absolute-path errors
+    local pkg_staging
+    pkg_staging="$(mktemp -d)"
+    cp "$final_zip" "${pkg_staging}/"
+    cp "$sha_file" "${pkg_staging}/sha256.txt"
+
+    (
+        cd "$pkg_staging"
+        oras push "$ref" \
+            --registry-config "$docker_config" \
+            --image-spec v1.1 \
+            "$(basename "$final_zip"):application/zip" \
+            "sha256.txt:text/plain" \
+            --annotation "org.opencontainers.image.source=https://github.com/${repo_slug}" \
+            --annotation "org.opencontainers.image.version=${tag_name}"
+    )
+
+    rm -rf "$pkg_staging"
+    github_package_ref="$ref"
+}
+
 trap 'notify "Distribution build failed"' ERR
 
 version="$(awk -F'"' '/MARKETING_VERSION:/ { print $2; exit }' project.yml)"
@@ -264,6 +320,13 @@ if [[ "$PUBLISH_GITHUB_RELEASE" == "1" ]]; then
     echo "GitHub Release: ${github_release_url}"
 else
     echo "GitHub Release: skipped (PUBLISH_GITHUB_RELEASE=${PUBLISH_GITHUB_RELEASE})"
+fi
+
+if [[ "$PUBLISH_GITHUB_PACKAGE" == "1" ]]; then
+    publish_github_package "$version" "$final_zip" "${release_dir}/sha256.txt"
+    echo "GitHub Package: ${github_package_ref}"
+else
+    echo "GitHub Package: skipped (PUBLISH_GITHUB_PACKAGE=${PUBLISH_GITHUB_PACKAGE})"
 fi
 
 notify "Distribution build v${version} is ready"

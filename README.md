@@ -2,10 +2,9 @@
 
 [Download on the Mac App Store](https://apps.apple.com/us/app/wp-media-uploader/id6759262491?mt=12) · [Download macOS binary (v1.0.1)](https://github.com/ddegner/wp-media-uploader/releases/download/v1.0.1/WPMediaUploader-v1.0.1-macOS.zip)
 
-WordPress media uploader with SSH + WP-CLI automation.
-An independent, open source macOS app to upload media to WordPress sites.
+Uploading large photos through a browser kept failing mid-transfer on my [photography portfolio](https://www.daviddegner.com) site — overwhelming the server or the browser before finishing. WP-CLI solves it reliably, but I didn't want to live in the terminal. So I built this: a SwiftUI wrapper around `rsync`, `ssh`, and `wp-cli` that's simple to use once set up, and rock solid on large media libraries.
 
-Designed for speed and reliability, it uses `rsync`, `ssh`, and `wp-cli` to handle large media libraries efficiently.
+Free on the App Store — and open source.
 
 **Version 1.0.1** · macOS 14+
 
