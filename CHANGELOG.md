@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-13
+
 ### Added
 - GitHub Actions release automation at `.github/workflows/release-package.yml` to build/sign/notarize/staple on tag pushes, publish GitHub Release assets, and publish a GHCR package containing the release zip + checksum.
 - `scripts/app_store_resubmit.sh` to update App Store metadata and submit versions for review, with explicit credential/version inputs and `umask 077`.
@@ -30,7 +32,7 @@ All notable changes to this project are documented in this file.
 - Drawer window-state persistence moved from `@AppStorage` to manual `UserDefaults` reads in `onAppear` to avoid spurious re-renders.
 - `JobPresentation` ETA/Rate lines no longer include label prefixes (now handled by `LabeledContent` in the UI).
 - `app_store_resubmit.sh` now supports build attachment, encryption declaration, and review notes upload.
-- Bumped build number to 5.
+- Bumped build number to 7.
 - SSH authentication now uses the app binary itself as `SSH_ASKPASS` helper instead of temporary shell scripts, which the App Sandbox blocked from being exec'd.
 - Remote WP-CLI commands auto-detect versioned PHP binaries (`php8.1`–`php8.4`) via `WP_CLI_PHP` to work on servers without a plain `php` symlink.
 - SSH remote commands now execute inside a login shell (`bash -lc`) so the server's full `PATH` is available.
